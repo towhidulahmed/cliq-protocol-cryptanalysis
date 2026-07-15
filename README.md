@@ -186,17 +186,7 @@ ASSA ABLOY states in their product documentation that CLIQ uses 128-bit AES. Loo
 
 The block boundary alignment analysis:
 
-```
-┌─────────────── 32 bytes (2 × AES-128 blocks) ──────────────┐
-│                                                              │
-│  AES Block 1 (16 bytes)  │  AES Block 2 (16 bytes)         │
-│  ┌──────────────────┐    │  ┌──────────┬──────────┐        │
-│  │ CIPHERTEXT (16B) │    │  │ CT (8B)  │ 00 (8B)  │        │
-│  │ Dynamic/random   │    │  │ Dynamic  │ Static   │        │
-│  └──────────────────┘    │  └──────────┴──────────┘        │
-│        bytes 0-15        │      bytes 16-23  bytes 24-31   │
-└──────────────────────────┴──────────────────────────────────┘
-```
+![AES-128 Block Boundary Alignment](assets/aes_block_alignment.png)
 
 The actual ciphertext portion is hard to isolate precisely because it is mixed in with protocol framing bytes. Out of the 89-byte region initially suspected to be "encrypted" (bytes 87-175 in the raw stream), only about 24 bytes are actually ciphertext. The rest is plaintext protocol data that happens to sit in the same area.
 
