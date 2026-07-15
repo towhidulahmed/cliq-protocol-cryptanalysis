@@ -385,7 +385,6 @@ The important takeaway: only about 20-30 bytes out of the full 255-byte exchange
 | 4 | 8 bytes of known plaintext (zero padding) in auth data | Medium |
 | 5 | Protocol unchanged for 10+ years (2014 same as 2024) | Medium |
 | 6 | Reject response `0x21` leaks authentication failure status | Low |
-| 7 | ~~Nonce-to-MAC correlations~~ — resolved as statistical artifact (Bonferroni correction: 0 survive) | ~~High~~ None |
 
 ### 7.1 Plaintext System ID
 
