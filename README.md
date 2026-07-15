@@ -1,4 +1,4 @@
-# Cryptographic Analysis of the ASSA ABLOY VERSO CLIQ 1-Wire Protocol
+# CLIQ Protocol Cryptanalysis
 
 This repository contains the cryptographic analysis of the electronic locking protocol used in the ASSA ABLOY VERSO CLIQ system. The focus here is on algorithm identification and weakness analysis through differential cryptanalysis of captured unlock sessions.
 
