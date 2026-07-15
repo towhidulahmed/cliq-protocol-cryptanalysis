@@ -29,10 +29,9 @@ System identifiers (system ID `V1004XXX`, key identifiers, installation-specific
 | Item | Status |
 |------|--------|
 | System under analysis | ASSA ABLOY VERSO CLIQ (single installation, system ID partially redacted as `V1004XXX`) |
-| Capture period | 2014 (Uni Rostock prior research) + 2024 (independent Saleae captures) |
+| Capture period | 2014 (University Rostock prior research) + 2024 (University of Rostock masters pre-thesis research work) |
 | Disclosure type | **Self-disclosure** of the author's own captured data, published for academic study and research purposes only |
 | Disclosure date | **2026-07-16** |
-| Vendor contact | **Not attempted.** This is independent academic research; no communication with the vendor has taken place. The author makes no claim of vendor endorsement, authorization, or response. |
 | Scope of disclosure | Protocol structure, statistical analysis of MAC and ciphertext, identified weaknesses. **No working key-recovery or unlock-emulation attack is demonstrated.** The author takes no responsibility for any exploitation derived from this work. |
 
 Researchers extending this work should treat the published MACs, nonces, and ciphertexts as **real captured data from a deployed system**, not synthetic examples. Offline brute-force attack research against the published (nonce, MAC) pairs is technically feasible (see [§7.4](#74-mac-and-nonce-publication)) and should not be undertaken without vendor coordination.
@@ -47,15 +46,16 @@ This analysis is grounded in an explicit threat model. The findings in this docu
 
 **Attacker capabilities considered:**
 
-| Capability | This analysis | Out of scope |
-|---|---|---|
-| Passive eavesdrop on the 1-Wire contact during a legitimate unlock | ✓ primary scenario | n/a |
-| Physical access to a legitimate key (e.g., borrowed, stolen briefly) | ✓ considered | n/a |
-| Active relay / forwarding of the 1-Wire signal between key and lock | ✓ considered | n/a |
-| Decapping / invasive silicon extraction of the DS28EC20 chip | n/a | Out of scope (different attacker class) |
-| Power/EM side-channel during MAC computation (DPA/CPA) | n/a | Out of scope (no equipment in this study; flagged as future work) |
-| Nation-state cryptanalytic infrastructure (e.g., SHA-1 collision infrastructure) | n/a | Out of scope for a physical-locking-system threat model |
-| Quantum-computing adversary | n/a | Not relevant for this product class |
+| Capability | Status |
+|---|---|
+| Passive eavesdrop on the 1-Wire contact during a legitimate unlock | Primary scenario (this analysis) |
+| Physical access to a legitimate key (e.g., borrowed, stolen briefly) | Considered |
+| Active relay / forwarding of the 1-Wire signal between key and lock | Considered |
+| Power/EM side-channel during MAC computation (DPA/CPA) | Future work (equipment-dependent) |
+| Advanced cryptanalytic computation (offline brute-force of secret key) | Future work (depends on secret length) |
+| Decapping / invasive silicon extraction of the DS28EC20 chip | Out of scope (different attacker class) |
+| Nation-state cryptanalytic infrastructure (e.g., SHA-1 collision infrastructure) | Out of scope for this threat model |
+| Quantum-computing adversary | Not relevant for this product class |
 
 **Attacker goals considered:**
 
@@ -266,50 +266,7 @@ ASSA ABLOY states in their product documentation that CLIQ uses 128-bit AES. Loo
 - The 8 zero bytes are unencrypted protocol padding, **not** ciphertext. If AES-CBC + PKCS#7 were used, standard padding would produce 32 bytes of ciphertext, but we observe only 24 bytes of ciphertext plus 8 plaintext zeros. This contradiction rules out **AES-CBC + PKCS#7**.
 - No repeated 16-byte blocks were found within any single capture, which **weakly** argues against ECB (but n=7 captures is far too small to strongly rule out ECB; reliably detecting ECB requires ~2^32 captures for 16-byte blocks).
 
-```
-+--------------------------------------------------------------------------+
-|  Phase-3 Payload : 32 Bytes = 2 x AES-128 Block Boundaries               |
-+--------------------------------------------------------------------------+
-
-  Byte:   0        8        16       24       32
-          |        |        |        |        |
-          v        v        v        v        v
-         +------------------+------------------+----+
-         |  CIPHERTEXT 24B  | PLAINTEXT ZEROS  | ?? |
-         | dynamic/session  |  static 0x00x8   |    |
-         +------------------+------------------+----+
-          +- Block 1 (16B) -++- Block 2 (16B) -+
-          +------------------+------------------+
-                     2 x AES-128 blocks
-
-  +----------------------------------------------------------------------+
-  |  KEY OBSERVATION: 24-byte ciphertext is NOT block-aligned             |
-  |                                                                      |
-  |  - 24 + 8 = 32 bytes = exactly 2 AES-128 blocks                      |
-  |  - 8 zero bytes are PLAINTEXT (always 0x00 across all captures)      |
-  |  - Standard CBC+PKCS#7 would produce 32B ct, not 24B ct + 8B pt      |
-  +----------------------------------------------------------------------+
-
-  MODE CONSISTENCY ANALYSIS
-+--------------------------------------------------------------------------+
-
-  OK CONSISTENT (cannot be ruled out passively):
-    - AES-CTR                      : stream mode, 8 zeros are pt framing
-    - AES-CBC + zero-padding       : last 8B ct decrypts to 0; discarded
-    - AES-CBC-CTS (NIST 800-38A)   : ciphertext stealing, no padding
-    - Single-block AES-CBC + 8B unencrypted metadata
-    - AES-ECB                      : cannot rule out at n=7
-
-  X  REJECTED by observations:
-    - AES-CBC + PKCS#7 padding     : would produce 32B ct, not 24+8
-
-+--------------------------------------------------------------------------+
-
-  VERDICT: AES mode cannot be determined passively.
-  Distinguishing CTR vs CBC-zero-pad vs CBC-CTS requires:
-    (a) chosen-plaintext captures (block independence test), or
-    (b) side-channel analysis (counter vs chaining detection).
-```
+![AES-128 Block Boundary Alignment](assets/aes_block_alignment.png)
 
 **Mode determination: AES-128 in some stream-compatible mode.** Multiple modes are consistent with the observed 24 ct + 8 pt-zero structure:
 
@@ -561,9 +518,9 @@ The `0x21` reject response at Phase 3 (vs. `0x11` accept) leaks whether authenti
 
 ---
 
-## 8. What Would Strengthen This Analysis
+## 8. Future Work
 
-The analysis has several limits because of sample size and equipment. Here is what additional data or capability would unlock:
+The analysis has several limits because of sample size and equipment. The following directions can be carried forward from here:
 
 | Additional data / capability | What it would tell us |
 |------------------------------|----------------------|
@@ -594,9 +551,7 @@ This analysis is bounded by the following limitations. Findings should be interp
 
 6. **Reliance on prior research data.** The 2014 captures come from University of Rostock IuK. While their work has been re-verified where possible (hard-coded NONCES / MACS / ENCRYPTED_PAYLOADS tables in `scripts/advanced_critique_analysis.py` match the raw `foo2-packets.txt`, `key1.txt`, `key2.txt` byte-for-byte), the original capture methodology and any preprocessing steps are not under this author's control.
 
-7. **No vendor confirmation.** ASSA ABLOY has not (yet) confirmed or denied the algorithm identifications in this analysis. The SHA-1 + AES-128 identification rests on indirect evidence (statistical properties + DS28EC20 command structure match), not on vendor documentation.
-
-8. **Post-quantum readiness is not assessed.** This is a physical-locking-system threat model; quantum cryptanalysis is not relevant. AES-128's effective security under Grover (~64 bits) is adequate for this product class through the 2030+ horizon.
+7. **Post-quantum readiness is not assessed.** This is a physical-locking-system threat model; quantum cryptanalysis is not relevant. AES-128's effective security under Grover (~64 bits) is adequate for this product class through the 2030+ horizon.
 
 ---
 
@@ -619,7 +574,7 @@ The cryptanalysis of 1-Wire secure-authentication chips and similar challenge-re
 
 - **AES mode security.** Standard CBC+PKCS#7 has known padding-oracle risks (Vaudenay 2002; later extended by many others). The fact that CLIQ does *not* use CBC+PKCS#7 (it uses a stream-compatible mode) avoids this class of attack. CTR mode has its own well-known pitfalls (nonce reuse catastrophic, no integrity without a separate MAC), but the CLIQ protocol's separate Phase-4 SHA-1 MAC mitigates the integrity gap.
 
-- **ASSA ABLOY CLIQ prior research.** The University of Rostock IuK work (2014) provided the initial signal-capture setup, protocol decoding, and the CRC-8 variant identification in `data/previous_research/patterns.php`. Their work is the foundation on which this cryptanalysis builds. The companion repo **[1wire-decoder-analysis](https://github.com/towhidulahmed/1wire-decoder-analysis)** documents the signal-decoding and relay-attack-feasibility analysis separately.
+- **ASSA ABLOY CLIQ prior research.** The companion repo **[1wire-decoder-analysis](https://github.com/towhidulahmed/1wire-decoder-analysis)** documents the author's initial work on this system, carried out at the University of Rostock during masters study in 2024. The 2014 Uni Rostock IuK research was used as a reference study during that work. This repository extends the research with full cryptographic analysis, differential cryptanalysis, and statistical verification.
 
 Researchers extending this work should also consult the ASSA ABLOY product documentation for VERSO CLIQ, which states "128-bit AES encryption" as the cipher. The analysis in this repo is consistent with that claim (with the mode-determination caveats above).
 
@@ -646,6 +601,7 @@ Other areas of concern: the system ID is exposed in plaintext every session (tra
 ```
 +- assets/
 |  +- protocol_flow.png                 # 4-phase Key<->Lock communication diagram
+|  +- aes_block_alignment.png           # 32-byte AES block-boundary alignment visualization
 +- data/
 |  +- captures/
 |  |  +- user1_key/           # 8 sessions (2024, Saleae)
@@ -670,7 +626,7 @@ Other areas of concern: the system ID is exposed in plaintext every session (tra
 +- README.md                           # This document
 ```
 
-The protocol flow diagram is in `assets/protocol_flow.png`. The AES block-boundary diagram is inline ASCII art in §4.2.
+The protocol flow diagram and AES block alignment diagram are in `assets/`.
 
 ## Running the Analysis
 
