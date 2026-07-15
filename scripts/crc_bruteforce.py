@@ -10,7 +10,9 @@ import os, sys, json, time
 from typing import List, Dict, Tuple
 from collections import Counter
 
-sys.path.insert(0, '/home/z/my-project/review/cliq-protocol-cryptanalysis/scripts')
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, SCRIPT_DIR)
 from advanced_critique_analysis import NONCES, ENCRYPTED_PAYLOADS
 
 REFLECT8 = [int('{:08b}'.format(i)[::-1], 2) for i in range(256)]
@@ -170,10 +172,10 @@ def main():
                   f"refin={m['refin']} refout={m['refout']}")
 
     # Save
-    os.makedirs('/home/z/my-project/download', exist_ok=True)
-    with open('/home/z/my-project/download/crc_bruteforce_results.json', 'w') as f:
+    out_path = os.path.join(REPO_ROOT, 'crc_bruteforce_results.json')
+    with open(out_path, 'w') as f:
         json.dump(all_results, f, indent=2)
-    print(f"\nResults saved to /home/z/my-project/download/crc_bruteforce_results.json")
+    print(f"\nResults saved to: {out_path}")
 
     # Summary
     total_matches = sum(len(v) for v in all_results.values())

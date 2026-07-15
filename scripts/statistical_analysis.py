@@ -12,7 +12,9 @@ import os, sys, math, json
 from collections import Counter
 from itertools import combinations
 
-sys.path.insert(0, '/home/z/my-project/review/cliq-protocol-cryptanalysis/scripts')
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, SCRIPT_DIR)
 from advanced_critique_analysis import NONCES, MACS, ENCRYPTED_PAYLOADS, hamming_distance_bytes
 
 # Exact t-distribution via regularized incomplete beta
@@ -129,7 +131,7 @@ def power_for_r(n, alpha, r_true):
 
 # C1: verify 0x33 command claim
 def verify_c1():
-    prev_dir = '/home/z/my-project/review/cliq-protocol-cryptanalysis/data/previous_research'
+    prev_dir = os.path.join(REPO_ROOT, 'data', 'previous_research')
     all_bytes = []
     for fname in ['decoded_unlock_sessions.txt', 'session_key_a.txt', 'session_key_b.txt']:
         with open(os.path.join(prev_dir, fname)) as f:
@@ -275,8 +277,7 @@ def main():
         print(f"    Nonce byte {pos}: {len(set(vals))}/{len(vals)} unique")
 
     # Save
-    os.makedirs('/home/z/my-project/download', exist_ok=True)
-    out_path = '/home/z/my-project/download/statistical_analysis_results.json'
+    out_path = os.path.join(REPO_ROOT, 'statistical_analysis_results.json')
     with open(out_path, 'w') as f:
         json.dump(results, f, indent=2, default=str)
     print(f"\nSaved: {out_path}")

@@ -13,7 +13,9 @@ plt.rcParams['font.family'] = 'DejaVu Sans Mono'
 K = '#000000'
 W = '#FFFFFF'
 
-OUT = '/home/z/my-project/review/cliq-protocol-cryptanalysis/assets'
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+OUT = os.path.join(REPO_ROOT, 'assets')
 os.makedirs(OUT, exist_ok=True)
 
 def strip_meta(path):

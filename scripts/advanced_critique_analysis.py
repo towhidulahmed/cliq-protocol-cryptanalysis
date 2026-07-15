@@ -120,17 +120,17 @@ ENCRYPTED_PAYLOADS = {
 # ============================================================================
 
 def pearson_correlation(x: List[float], y: List[float]) -> float:
-    """Compute Pearson correlation coefficient."""
+    """Compute Pearson correlation coefficient (sample correlation)."""
     n = len(x)
     if n < 3:
         return 0.0
     mean_x = sum(x) / n
     mean_y = sum(y) / n
-    cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y)) / n
-    std_x = (sum((xi - mean_x)**2 for xi in x) / n) ** 0.5
-    std_y = (sum((yi - mean_y)**2 for yi in y) / n) ** 0.5
-    if std_x > 0 and std_y > 0:
-        return cov / (std_x * std_y)
+    num = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+    den_x = math.sqrt(sum((xi - mean_x)**2 for xi in x))
+    den_y = math.sqrt(sum((yi - mean_y)**2 for yi in y))
+    if den_x > 0 and den_y > 0:
+        return num / (den_x * den_y)
     return 0.0
 
 def t_statistic_from_r(r: float, n: int) -> float:
