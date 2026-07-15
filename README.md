@@ -462,8 +462,6 @@ Remaining areas of concern: the system ID is exposed in plaintext every session,
 │   ├── differential_cryptanalysis.py   # Differential cryptanalysis suite
 │   ├── extended_analysis.py            # Multi-source analysis (all 23 sessions)
 │   └── advanced_critique_analysis.py   # Bonferroni correction, CRC-16 tests, SAC analysis, AES mode determination
-├── docs/
-│   └── crypto_analysis.md              # Detailed report (mirrored in this README)
 └── README.md
 ```
 
