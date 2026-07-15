@@ -1,0 +1,35 @@
+{
+  "critique_1": {
+    "title": "Multiple Hypothesis Testing",
+    "total_tests": 176,
+    "uncorrected_significant": 7,
+    "expected_false_positives": 8.8,
+    "bonferroni_significant": 0,
+    "verdict": "Statistical artifact \u2014 no real correlations survive correction"
+  },
+  "critique_2": {
+    "title": "CRC-16 on MAC[20:22]",
+    "mac_length": 22,
+    "sha1_output_length": 20,
+    "tail_bytes": 2,
+    "verdict": "MAC[20:22] are likely device status/CRC, not SHA-1 output"
+  },
+  "critique_3": {
+    "title": "SAC vs Output Independence",
+    "correct_term": "Pairwise Output Independence",
+    "incorrect_term": "Avalanche Effect / SAC",
+    "sac_testable": false,
+    "output_independence_testable": true,
+    "verdict": "Terminology should be corrected; true SAC requires chosen inputs"
+  },
+  "critique_4": {
+    "title": "AES Block Mode Determination",
+    "ciphertext_length": 24,
+    "zero_padding_length": 8,
+    "total_payload": 32,
+    "aes_blocks": 2,
+    "most_likely_mode": "AES-128-CTR",
+    "cbc_likely": false,
+    "verdict": "AES-CTR most likely; CBC contradicts non-block-aligned ciphertext"
+  }
+}
