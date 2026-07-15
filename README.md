@@ -131,88 +131,7 @@ The key acts as the bus master. The lock is the slave device and is powered by t
 
 By aligning all 23 captures and parsing the command/response boundaries, the protocol breaks down into a fixed four-phase structure. Every observed unlock attempt follows the same sequence.
 
-```
-╔══════════════════════════════════════════════════════════════════════════╗
-║          CLIQ 1-Wire Protocol : Communication Flow                        ║
-║       Four-phase challenge-response unlock session                         ║
-║   ~255 bytes · ~7.6 ms · 1-Wire bus · pulse-width encoded                  ║
-╚══════════════════════════════════════════════════════════════════════════╝
-
-  Legend:  [K->L] = Key -> Lock  (master command)
-           [L->K] = Lock -> Key  (slave response)
-
-═══════════════════════════════════════════════════════════════════════════
-  > PHASE 1 : IDENTITY EXCHANGE
-    Plaintext system ID + key identifier + counter area
-═══════════════════════════════════════════════════════════════════════════
-
-  [K->L]  82 00 01 01 1B 03 | 56 31 30 30 34 XX XX XX | 1Ex7 | 41 02 00 08 01 04 | [6B ctr] [CRC]
-         +---- header ----+ +-- sys ID "V1004XXX" --+  pad  +----- config ---------+
-
-  [L->K]  00 01 11 18 03 | 56 31 30 30 34 XX XX XX | 1Ex7 | 61 90 01 01 00 04 00 00 [CRC]
-         +---- header ---+ +-- sys ID echo --------+  pad  +------ config ----------+
-
-  !  System ID sent in PLAINTEXT. Bytes 27-28 = key identifier (visible in clear).
-
-═══════════════════════════════════════════════════════════════════════════
-                                  |
-                                  v
-═══════════════════════════════════════════════════════════════════════════
-  > PHASE 2 : NONCE EXCHANGE (CHALLENGE)
-    Lock emits 8 random bytes, the challenge nonce
-═══════════════════════════════════════════════════════════════════════════
-
-  [K->L]  82 00 02 08 00 [CRC]
-         +- read memory -+
-
-  [L->K]  00 02 11 08 | DC AF E0 29 A9 9C 5B 95 | [CRC]
-         +-- header --+ +---- 8-byte nonce -----+
-
-  OK  7 captures: all unique nonces, mean pairwise Hamming ~ 50.1%, proper RNG.
-
-═══════════════════════════════════════════════════════════════════════════
-                                  |
-                                  v
-═══════════════════════════════════════════════════════════════════════════
-  > PHASE 3 : ENCRYPTED AUTHENTICATION PAYLOAD
-    24-byte ciphertext + 8-byte plaintext zeros + trailing byte
-═══════════════════════════════════════════════════════════════════════════
-
-  [K->L]  82 00 03 0A 20 | [======== 24B ciphertext ========] | 00x8 | [CRC]
-         +-- header ---+ +-- dynamic, per-session -----------+ +- pt -+
-
-         AES-128 in stream-compatible mode (CTR / CBC-zero-pad / CBC-CTS /
-         single-block CBC). Cannot distinguish without chosen-plaintext.
-
-  [L->K]  ACCEPT:  00 03 11 18 [24 zero bytes] 50  -> proceed to Phase 4
-         REJECT:  00 03 21 00 58                  -> authentication failed
-
-  !  8 zero bytes are PLAINTEXT padding (static across all 23 captures).
-  OK  A rejection was captured in prev_pkt2, lock actively validates this data.
-
-═══════════════════════════════════════════════════════════════════════════
-                                  |
-                                  v
-═══════════════════════════════════════════════════════════════════════════
-  > PHASE 4 : MAC VERIFICATION
-    22-byte MAC, likely 20B SHA-1 + 2B device status
-═══════════════════════════════════════════════════════════════════════════
-
-  [K->L]  82 00 04 80 15 | [========== 20B SHA-1 ==========] | [2B status]
-         +-- header ---+ +-- matches DS28EC20 Compute MAC ---+
-
-         Statistical properties (n=6 paired sessions):
-           Mean Hamming distance:      50.04%   (ideal: 50%)
-           Per-bit flip probability:   0.5004   (ideal: 0.5000)
-
-  [L->K]  00 04 11 02 01 01 63  ->  motor activates, key can be turned
-
-═══════════════════════════════════════════════════════════════════════════
-
-  Sources: 23 captures (2014-2024), Uni Rostock IuK prior research + 2024
-  Saleae captures. Stats over 6-7 paired (nonce, MAC) sessions.
-  System ID last 3 digits redacted for responsible disclosure.
-```
+![CLIQ Protocol Communication Flow](assets/protocol_flow.png)
 
 ### 3.1 Packet Format
 
@@ -725,6 +644,8 @@ Other areas of concern: the system ID is exposed in plaintext every session (tra
 ## Repository Structure
 
 ```
++- assets/
+|  +- protocol_flow.png                 # 4-phase Key<->Lock communication diagram
 +- data/
 |  +- captures/
 |  |  +- user1_key/           # 8 sessions (2024, Saleae)
@@ -749,7 +670,7 @@ Other areas of concern: the system ID is exposed in plaintext every session (tra
 +- README.md                           # This document
 ```
 
-Diagrams are inline ASCII art in this README; there are no external image files.
+The protocol flow diagram is in `assets/protocol_flow.png`. The AES block-boundary diagram is inline ASCII art in §4.2.
 
 ## Running the Analysis
 
