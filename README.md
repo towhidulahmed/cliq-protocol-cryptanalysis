@@ -52,6 +52,8 @@ The key acts as the bus master. The lock is the slave device and is powered by t
 
 By aligning all 23 captures and parsing the command/response boundaries, we can now describe the full protocol. Every unlock attempt follows the same four-phase structure.
 
+![CLIQ Protocol Communication Flow](assets/protocol_flow.png)
+
 ### 3.1 Packet Format
 
 Every packet starts with a 2-byte header:
