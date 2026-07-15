@@ -251,14 +251,9 @@ def make_aes_block():
     ax.text(57, col_y - 3.1, '  Would produce 32B ct, not 24+8',
             ha='left', va='center', fontsize=7.5, color=K, style='italic')
 
-    # Verdict box
-    y_v = 3.5
-    ax.add_patch(Rectangle((8, y_v - 2), 84, 4,
-                            facecolor=W, edgecolor=K, linewidth=0.8))
-    ax.text(50, y_v + 0.5, 'VERDICT: AES mode cannot be determined passively.',
-            ha='center', va='center', fontsize=9, fontweight='bold', color=K)
-    ax.text(50, y_v - 1, 'Distinguishing requires chosen-plaintext captures or side-channel analysis.',
-            ha='center', va='center', fontsize=8, color=K, style='italic')
+    # Closing note (left-aligned, no box)
+    ax.text(8, 2.5, 'AES mode cannot be determined passively. Distinguishing requires chosen-plaintext captures or side-channel analysis.',
+            ha='left', va='center', fontsize=8, color=K, style='italic')
 
     out = os.path.join(OUT, 'aes_block_alignment.png')
     plt.savefig(out, dpi=150, facecolor='white', bbox_inches='tight',

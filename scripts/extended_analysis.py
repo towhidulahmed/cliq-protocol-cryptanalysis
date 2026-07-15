@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Extended Differential Cryptanalysis incorporating:
-1. Previous researcher's 6 decoded packets (foo2-packets.txt)  
+1. Previous researcher's 6 decoded packets (decoded_unlock_sessions.txt)  
 2. Extas_compare CSV files (t1-t5.csv)
 3. Original 10 TimeStamps captures
 
@@ -79,7 +79,7 @@ def process_csv_file(file_path: str, reader_func) -> List[int]:
     return binary_to_bytes(binary_data)
 
 def parse_previous_work_packets(file_path: str) -> List[List[int]]:
-    """Parse the foo2-packets.txt format - extract complete unlock sessions."""
+    """Parse the decoded_unlock_sessions.txt format - extract complete unlock sessions."""
     sessions = []
     current_session = []
     
@@ -133,7 +133,7 @@ def parse_previous_work_packets(file_path: str) -> List[List[int]]:
     return sessions
 
 def parse_key_txt(file_path: str) -> List[int]:
-    """Parse key1.txt/key2.txt format."""
+    """Parse session_key_a.txt/session_key_b.txt format."""
     byte_values = []
     with open(file_path, 'r') as f:
         for line in f:
@@ -187,7 +187,7 @@ def extract_protocol_fields(session: List[int]) -> Dict:
             result['system_id'] = {'position': i, 'value': 'V1004261'}
             break
     
-    # Based on the packet structure from foo2-packets.txt:
+    # Based on the packet structure from decoded_unlock_sessions.txt:
     # The protocol uses a command/response structure:
     # 82 00 XX YY = command from master (lock/key)
     #    XX = command sequence number (01, 02, 03, 04)
@@ -323,7 +323,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
     print(f"  Total: {len(all_sessions)}")
     
     # Extract nonce (challenge) bytes from each session using the known protocol structure
-    # From foo2-packets.txt, the nonce is at: "00 02 11 08" followed by 8+1 bytes
+    # From decoded_unlock_sessions.txt, the nonce is at: "00 02 11 08" followed by 8+1 bytes
     print(f"\n{'─' * 70}")
     print("NONCE/CHALLENGE EXTRACTION (packet: 00 02 11 08 <8 bytes> <crc>)")
     print(f"{'─' * 70}")
@@ -342,7 +342,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
                 break
     
     # Extract MAC (authentication hash) from each session
-    # From foo2-packets.txt, MAC is at: "82 00 04 80 15" followed by 22 bytes
+    # From decoded_unlock_sessions.txt, MAC is at: "82 00 04 80 15" followed by 22 bytes
     print(f"\n{'─' * 70}")
     print("SHA-1 MAC EXTRACTION (packet: 82 00 04 80 15 <22 bytes>)")
     print(f"{'─' * 70}")
@@ -358,7 +358,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
                 break
     
     # Extract encrypted payload from each session
-    # From foo2-packets.txt, encrypted data is at: "82 00 03 0a 20" followed by 33 bytes
+    # From decoded_unlock_sessions.txt, encrypted data is at: "82 00 03 0a 20" followed by 33 bytes
     print(f"\n{'─' * 70}")
     print("ENCRYPTED PAYLOAD EXTRACTION (packet: 82 00 03 0A 20 <33 bytes>)")
     print(f"{'─' * 70}")
@@ -550,7 +550,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
         print(f"    Static bytes: {static_bytes}/{min_plen} ({static_bytes/min_plen*100:.1f}%)")
         print(f"    Dynamic bytes: {dynamic_bytes}/{min_plen} ({dynamic_bytes/min_plen*100:.1f}%)")
         
-        # The encrypted payload from foo2-packets has this structure:
+        # The encrypted payload from decoded_unlock_sessions has this structure:
         # 82 00 03 0a 20 [24 bytes encrypted] [8 bytes zeros] [1 byte CRC]
         # Let's check if the zeros are always there
         print(f"\n  Checking for zero-padding pattern in encrypted payload:")
@@ -583,8 +583,8 @@ def main():
     
     prev_work_path = os.path.join(repo_root, "data", "previous_research")
     
-    # Load from foo2-packets.txt
-    packets_file = os.path.join(prev_work_path, "foo2-packets.txt")
+    # Load from decoded_unlock_sessions.txt
+    packets_file = os.path.join(prev_work_path, "decoded_unlock_sessions.txt")
     if os.path.exists(packets_file):
         prev_sessions = parse_previous_work_packets(packets_file)
         for i, session in enumerate(prev_sessions):
@@ -592,8 +592,8 @@ def main():
             all_labels.append(f"prev_pkt{i+1}")
             print(f"  Loaded prev_pkt{i+1}: {len(session)} bytes")
     
-    # Load from key1.txt, key2.txt (different key from earlier research)
-    for kf in ['key1.txt', 'key2.txt']:
+    # Load from session_key_a.txt, session_key_b.txt (different key from earlier research)
+    for kf in ['session_key_a.txt', 'session_key_b.txt']:
         path = os.path.join(prev_work_path, kf)
         if os.path.exists(path):
             data = parse_key_txt(path)

@@ -123,7 +123,7 @@ The signal is a standard 1-Wire bus with pulse-width encoded data:
 
 The key acts as the bus master. The lock is the slave device and is powered by the key's battery through the contact pin.
 
-> **Decoder note.** The Python pulse decoder in `scripts/decode_signal.py` classifies pulses as '1' if `3 ≤ duration ≤ 7 µs` and as '0' if `duration > 11 µs`. Pulses in the 7-11 µs gap are silently dropped. The original Uni Rostock decoder (`data/previous_research/patterns.php`) uses a more robust state machine with explicit "short pulse followed by pause" / "long pulse followed by pause" patterns that handle end-of-byte transitions. Captures that produce misaligned bytes under the Python decoder should be re-decoded with the PHP variant.
+> **Decoder note.** The Python pulse decoder in `scripts/decode_signal.py` classifies pulses as '1' if `3 ≤ duration ≤ 7 µs` and as '0' if `duration > 11 µs`. Pulses in the 7-11 µs gap are silently dropped. The original Uni Rostock decoder (`data/previous_research/protocol_decoder.php`) uses a more robust state machine with explicit "short pulse followed by pause" / "long pulse followed by pause" patterns that handle end-of-byte transitions. Captures that produce misaligned bytes under the Python decoder should be re-decoded with the PHP variant.
 
 ---
 
@@ -285,7 +285,7 @@ ASSA ABLOY states in their product documentation that CLIQ uses 128-bit AES. Loo
 
 A trailing byte appears at the end of every packet in the protocol. Its specific algorithm has not been identified.
 
-A brute-force search was performed over the entire 2^17 CRC-8 parameter space (polynomial x initial value x final XOR x reflect-input x reflect-output) against 7 known (Phase-3 payload, trailing byte) pairs and 7 known (Phase-2 nonce packet, trailing byte) pairs. **Zero CRC-8 variants match any plausible input combination.** The `patterns.php` extra-zero-pass variant was also tested and does not match. Simple XOR, sum-8, and two's-complement-sum-8 checksums were also tested and do not match.
+A brute-force search was performed over the entire 2^17 CRC-8 parameter space (polynomial x initial value x final XOR x reflect-input x reflect-output) against 7 known (Phase-3 payload, trailing byte) pairs and 7 known (Phase-2 nonce packet, trailing byte) pairs. **Zero CRC-8 variants match any plausible input combination.** The `protocol_decoder.php` extra-zero-pass variant was also tested and does not match. Simple XOR, sum-8, and two's-complement-sum-8 checksums were also tested and do not match.
 
 The trailing byte is therefore **unidentified**. Plausible candidates that have not yet been ruled out include:
 
@@ -549,7 +549,7 @@ This analysis is bounded by the following limitations. Findings should be interp
 
 5. **Trailing checksum byte unidentified.** The brute-force search over 2^17 CRC-8 variants returned zero matches. The trailing byte is some form of per-packet checksum, but its specific algorithm is unknown. This is a quality gap, not a security gap: the trailing byte provides error detection at most.
 
-6. **Reliance on prior research data.** The 2014 captures come from University of Rostock IuK. While their work has been re-verified where possible (hard-coded NONCES / MACS / ENCRYPTED_PAYLOADS tables in `scripts/advanced_critique_analysis.py` match the raw `foo2-packets.txt`, `key1.txt`, `key2.txt` byte-for-byte), the original capture methodology and any preprocessing steps are not under this author's control.
+6. **Reliance on prior research data.** The 2014 captures come from University of Rostock IuK. While their work has been re-verified where possible (hard-coded NONCES / MACS / ENCRYPTED_PAYLOADS tables in `scripts/advanced_critique_analysis.py` match the raw `decoded_unlock_sessions.txt`, `session_key_a.txt`, `session_key_b.txt` byte-for-byte), the original capture methodology and any preprocessing steps are not under this author's control.
 
 7. **Post-quantum readiness is not assessed.** This is a physical-locking-system threat model; quantum cryptanalysis is not relevant. AES-128's effective security under Grover (~64 bits) is adequate for this product class through the 2030+ horizon.
 
@@ -608,11 +608,11 @@ Other areas of concern: the system ID is exposed in plaintext every session (tra
 |  |  +- user2_key/           # 2 sessions (2024, different key)
 |  |  +- extas_comparison/    # 5 sessions (2024, comparison captures)
 |  +- previous_research/      # Uni Rostock decoded packets (~2014)
-|     +- foo2-packets.txt     # 6 decoded unlock sessions (hex + ASCII)
-|     +- key1.txt             # Decoded session from a second key
-|     +- key2.txt             # Another session from that second key
-|     +- patterns.php         # Uni Rostock protocol decoder (CRC-8 variant)
-|     +- dump.c               # C program for extracting transitions from ADC captures
+|     +- decoded_unlock_sessions.txt  # 6 decoded unlock sessions (hex + ASCII)
+|     +- session_key_a.txt          # Decoded session from a second key
+|     +- session_key_b.txt          # Another session from that second key
+|     +- protocol_decoder.php       # Uni Rostock protocol decoder (CRC-8 variant)
+|     +- signal_extractor.c         # C program for extracting transitions from ADC captures
 |     +- ATTRIBUTION.md
 +- scripts/
 |  +- decode_signal.py                # Core 1-Wire signal decoder

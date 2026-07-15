@@ -37,7 +37,7 @@ NONCES = {
 }
 
 # 6 MACs from Phase 4 (authentication hash), 22 bytes each
-# Source: data/previous_research/foo2-packets.txt, key1.txt, key2.txt
+# Source: data/previous_research/decoded_unlock_sessions.txt, session_key_a.txt, session_key_b.txt
 # Format: 82 00 04 80 15 [22 bytes MAC] - we extract the 22 bytes after "80 15"
 MACS = {
     'prev_pkt1': [0x85, 0x72, 0xD1, 0x57, 0xFE, 0xBA, 0x71, 0xF5,
@@ -61,7 +61,7 @@ MACS = {
 }
 
 # Encrypted payloads from Phase 3 (24 ciphertext + 8 zeros + 1 CRC)
-# Source: data/previous_research/foo2-packets.txt, key1.txt, key2.txt
+# Source: data/previous_research/decoded_unlock_sessions.txt, session_key_a.txt, session_key_b.txt
 # Format: 82 00 03 0A 20 [24 bytes ciphertext] [8 bytes 0x00] [CRC]
 ENCRYPTED_PAYLOADS = {
     'prev_pkt1': {

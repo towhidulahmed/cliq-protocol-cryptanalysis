@@ -11,11 +11,11 @@ The files in this directory were originally produced at the **University of Rost
 
 | File | Description |
 |------|-------------|
-| `foo2-packets.txt` | 6 decoded unlock sessions showing full hex + ASCII packet data |
-| `key1.txt` | Decoded session from a second key (including raw bit-level data) |
-| `key2.txt` | Another decoded session from that second key |
-| `patterns.php` | Protocol decoder with pulse-width pattern matching and CRC-8 |
-| `dump.c` | C program for extracting signal transitions from raw ADC captures |
+| `decoded_unlock_sessions.txt` | 6 decoded unlock sessions showing full hex + ASCII packet data |
+| `session_key_a.txt` | Decoded session from a second key (including raw bit-level data) |
+| `session_key_b.txt` | Another decoded session from that second key |
+| `protocol_decoder.php` | Protocol decoder with pulse-width pattern matching and CRC-8 |
+| `signal_extractor.c` | C program for extracting signal transitions from raw ADC captures |
 
 ## Context
 

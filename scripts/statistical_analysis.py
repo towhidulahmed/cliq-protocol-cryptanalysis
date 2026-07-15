@@ -131,7 +131,7 @@ def power_for_r(n, alpha, r_true):
 def verify_c1():
     prev_dir = '/home/z/my-project/review/cliq-protocol-cryptanalysis/data/previous_research'
     all_bytes = []
-    for fname in ['foo2-packets.txt', 'key1.txt', 'key2.txt']:
+    for fname in ['decoded_unlock_sessions.txt', 'session_key_a.txt', 'session_key_b.txt']:
         with open(os.path.join(prev_dir, fname)) as f:
             for line in f:
                 if line.strip().startswith('hex:'):

@@ -183,7 +183,7 @@ def main():
         print("\n  ⚠ No standard CRC-8 variant matches any plausible input combination.")
         print("  This suggests the trailing byte is either:")
         print("  - A non-CRC checksum (e.g., XOR, modular sum, custom polynomial)")
-        print("  - A CRC with non-standard parameters (e.g., the patterns.php extra-zero-pass variant)")
+        print("  - A CRC with non-standard parameters (e.g., the protocol_decoder.php extra-zero-pass variant)")
         print("  - A truncated hash or sequence-derived value")
         print("  No standard CRC-8 variant (including CRC-8/MAXIM) matches any plausible input combination.")
 
