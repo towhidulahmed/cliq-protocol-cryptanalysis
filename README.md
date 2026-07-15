@@ -1,11 +1,82 @@
 # Cryptographic Analysis of the ASSA ABLOY VERSO CLIQ 1-Wire Protocol
 
-This repository contains the cryptographic analysis of the electronic locking protocol used in the ASSA ABLOY VERSO CLIQ system. The focus here is on algorithm identification and weakness analysis through differential cryptanalysis of captured unlock sessions.
+> **Research documentation. Read the [Disclaimer](#disclaimer) and [Responsible Disclosure](#responsible-disclosure) before reading further.**
 
-For background on how the signal capture and protocol decoding works, see the initial analysis repository:
-**[1wire-decoder-analysis](https://github.com/towhidulahmed/1wire-decoder-analysis)**
+This repository contains a black-box cryptanalysis of the electronic locking protocol used in the ASSA ABLOY VERSO CLIQ system. The focus is on algorithm identification, statistical verification of cryptographic claims, and weakness analysis through differential cryptanalysis of captured unlock sessions.
 
-The earlier protocol-level research data used in this analysis was originally produced at the **University of Rostock**, Chair of Information and Communication Services (IuK). See [data/previous_research/ATTRIBUTION.md](data/previous_research/ATTRIBUTION.md) for details.
+For background on signal capture and protocol decoding, see the companion repo: **[1wire-decoder-analysis](https://github.com/towhidulahmed/1wire-decoder-analysis)**.
+
+Earlier protocol-level research data was originally produced at the **University of Rostock**, Chair of Information and Communication Services (IuK). See [`data/previous_research/ATTRIBUTION.md`](data/previous_research/ATTRIBUTION.md) for details.
+
+---
+
+## Disclaimer
+
+**This repository is published solely for academic study and security-research purposes.** It documents the cryptographic structure observed on a single deployed CLIQ locking system and identifies open research questions. It does **not** contain working exploits, key-recovery tools, unlock-emulation code, or step-by-step instructions for defeating any locking system.
+
+**The author assumes no responsibility for any misuse of the information in this repository.** Any exploitation, unauthorized access, or attempt to defeat a CLIQ system — or any other system — based on this analysis is the sole responsibility of the person undertaking it. The author does not endorse, encourage, or take responsibility for any act of unauthorized access, circumvention, or damage that may result from applying the information published here.
+
+Researchers extending this work are expected to comply with all applicable laws and to act in accordance with responsible-disclosure norms. If you discover a working attack, coordinate with the vendor before publishing.
+
+The captured data is real, drawn from a deployed system, and is published for reproducibility of the statistical analysis. The (nonce, MAC) pairs in particular enable offline brute-force attack research; researchers should not publish successful key-recovery results without vendor coordination.
+
+System identifiers (system ID `V1004XXX`, key identifiers, installation-specific counter values) are partially redacted throughout this repository. The raw capture data in `data/previous_research/` is reproduced with permission from the University of Rostock IuK; redistribution restrictions may apply — contact the IuK chair before re-publishing.
+
+---
+
+## Responsible Disclosure
+
+| Item | Status |
+|------|--------|
+| System under analysis | ASSA ABLOY VERSO CLIQ (single installation, system ID partially redacted as `V1004XXX`) |
+| Capture period | 2014 (Uni Rostock prior research) + 2024 (independent Saleae captures) |
+| Disclosure type | **Self-disclosure** of the author's own captured data, published for academic study and research purposes only |
+| Disclosure date | **2026-07-16** |
+| Vendor contact | **Not attempted.** This is independent academic research; no communication with the vendor has taken place. The author makes no claim of vendor endorsement, authorization, or response. |
+| Scope of disclosure | Protocol structure, statistical analysis of MAC and ciphertext, identified weaknesses. **No working key-recovery or unlock-emulation attack is demonstrated.** The author takes no responsibility for any exploitation derived from this work. |
+
+Researchers extending this work should treat the published MACs, nonces, and ciphertexts as **real captured data from a deployed system**, not synthetic examples. Offline brute-force attack research against the published (nonce, MAC) pairs is technically feasible (see [§7.4](#74-mac-and-nonce-publication)) and should not be undertaken without vendor coordination.
+
+---
+
+## Threat Model
+
+This analysis is grounded in an explicit threat model. The findings in this document are only meaningful relative to that model.
+
+**Asset.** The ability to unlock a specific physical door protected by a CLIQ cylinder, using a legitimate CLIQ key.
+
+**Attacker capabilities considered:**
+
+| Capability | This analysis | Out of scope |
+|---|---|---|
+| Passive eavesdrop on the 1-Wire contact during a legitimate unlock | ✓ primary scenario | — |
+| Physical access to a legitimate key (e.g., borrowed, stolen briefly) | ✓ considered | — |
+| Active relay / forwarding of the 1-Wire signal between key and lock | ✓ considered | — |
+| Decapping / invasive silicon extraction of the DS28EC20 chip | — | Out of scope (different attacker class) |
+| Power/EM side-channel during MAC computation (DPA/CPA) | — | Out of scope (no equipment in this study; flagged as future work) |
+| Nation-state cryptanalytic infrastructure (e.g., SHA-1 collision infrastructure) | — | Out of scope for a physical-locking-system threat model |
+| Quantum-computing adversary | — | Not relevant for this product class |
+
+**Attacker goals considered:**
+
+1. **Unauthorized unlock** of a specific door (highest impact).
+2. **Tracking** — determining which key unlocked which door and when (privacy goal).
+3. **Cloning** — extracting enough information from one or more captures to fabricate a working key emulator.
+4. **Replay/relay** — unlocking without possessing the key at unlock time.
+
+**Security properties the protocol attempts to provide:**
+
+- Mutual authentication (key proves identity to lock; lock proves identity to key)
+- Per-session freshness (challenge-response with random nonce)
+- Confidentiality of access-rights data (AES-encrypted payload)
+- Integrity of message exchange (trailing checksum byte — see §4.3)
+
+**Security properties the protocol does *not* provide:**
+
+- Distance bounding (relay attack feasibility — see [§7.2](#72-no-distance-bounding-relay-attack-feasible))
+- Anonymity / unlinkability of keys (see [§7.1](#71-plaintext-system-id-and-key-identifier) and [§7.3](#73-key-identification-in-clear))
+- Forward secrecy (captured sessions remain useful if the secret is later compromised)
+- Side-channel resistance (untested in this study)
 
 ---
 
@@ -15,7 +86,11 @@ This document describes the cryptographic analysis of the electronic communicati
 
 The analysis is based on 23 captured unlock sessions collected over roughly 10 years (2014 to 2024), using multiple keys on the same locking system. The earlier captures come from research at the University of Rostock (IuK department), while the 2024 captures were collected independently using a Saleae logic analyzer.
 
-The question we are trying to answer: what cryptographic algorithm does this system use, and how strong is it in practice?
+The question we are trying to answer: **what cryptographic algorithm does this system use, and how strong is it in practice under a passive-eavesdrop + relay threat model?**
+
+This is a **v2** document. It supersedes an earlier version of the analysis that contained two incorrect claims (a "0x33 Compute SHA command found" assertion and a "CRC-8/MAXIM confirmed" assertion), neither of which is supported by the data. Both retractions and the methodology used to verify them are documented in [§5](#5-corrected-claims-from-v1) and in the analysis scripts under `scripts/`.
+
+---
 
 ## 2. What We Are Working With
 
@@ -27,11 +102,13 @@ The question we are trying to answer: what cryptographic algorithm does this sys
 | User 1 captures | 8 | 2024 | User 1's key | Saleae Logic Analyzer |
 | User 2 captures | 2 | 2024 | User 2's key | Saleae Logic Analyzer |
 | Comparison captures | 5 | 2024 | User 1's key | Saleae Logic Analyzer |
-| **Total** | **23** | **2014-2024** | **3+ keys** | |
+| **Total** | **23** | **2014–2024** | **3+ keys** | |
 
 Each capture contains one complete unlock event: the full signal exchanged between the key and the lock, from the moment the key is inserted until the lock either opens or rejects.
 
-A complete unlock session is about 255 bytes long and takes roughly 7.6 milliseconds.
+A complete unlock session is about 255 bytes long and takes roughly 7.6 milliseconds end-to-end.
+
+Of the 23 captures, only 6–7 contain a fully decodable (nonce, MAC) pair suitable for paired statistical analysis. This sample size is the single most important limitation of the study — see [§9 Limitations](#9-limitations).
 
 ### 2.2 Signal Characteristics
 
@@ -39,61 +116,144 @@ The signal is a standard 1-Wire bus with pulse-width encoded data:
 
 | Parameter | Value |
 |-----------|-------|
-| Logic high voltage | ~2.98V (from CR2032 coin cell) |
-| Logic low voltage | 0V |
-| Write '1' pulse | ~4.3 us low |
-| Write '0' pulse | ~13.7 us low |
-| Full bit cycle | ~18.75 us |
+| Logic high voltage | ~2.98 V (from CR2032 coin cell) |
+| Logic low voltage | 0 V |
+| Write '1' pulse | ~4.3 µs low |
+| Write '0' pulse | ~13.7 µs low |
+| Full bit cycle | ~18.75 µs |
 | Communication frequency | ~131 Hz repetition |
 
 The key acts as the bus master. The lock is the slave device and is powered by the key's battery through the contact pin.
 
+> **Decoder note.** The Python pulse decoder in `scripts/decode_signal.py` classifies pulses as '1' if `3 ≤ duration ≤ 7 µs` and as '0' if `duration > 11 µs`. Pulses in the 7–11 µs gap are silently dropped. The original Uni Rostock decoder (`data/previous_research/patterns.php`) uses a more robust state machine with explicit "short pulse followed by pause" / "long pulse followed by pause" patterns that handle end-of-byte transitions. Captures that produce misaligned bytes under the Python decoder should be re-decoded with the PHP variant or with the gap-handling fix described in [§10](#10-corrected-claims-from-v1).
+
+---
+
 ## 3. Protocol Structure
 
-By aligning all 23 captures and parsing the command/response boundaries, we can now describe the full protocol. Every unlock attempt follows the same four-phase structure.
+By aligning all 23 captures and parsing the command/response boundaries, the protocol breaks down into a fixed four-phase structure. Every observed unlock attempt follows the same sequence.
 
-![CLIQ Protocol Communication Flow](assets/protocol_flow.png)
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║          CLIQ 1-Wire Protocol — Communication Flow                        ║
+║       Four-phase challenge-response unlock session                         ║
+║   ~255 bytes · ~7.6 ms · 1-Wire bus · pulse-width encoded                  ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+  Legend:  [K→L] = Key → Lock  (master command)
+           [L→K] = Lock → Key  (slave response)
+
+═══════════════════════════════════════════════════════════════════════════
+  ▸ PHASE 1 — IDENTITY EXCHANGE
+    Plaintext system ID + key identifier + counter area
+═══════════════════════════════════════════════════════════════════════════
+
+  [K→L]  82 00 01 01 1B 03 | 56 31 30 30 34 XX XX XX | 1E×7 | 41 02 00 08 01 04 | [6B ctr] [CRC]
+         └──── header ────┘ └── sys ID "V1004XXX" ──┘  pad  └───── config ─────────┘
+
+  [L→K]  00 01 11 18 03 | 56 31 30 30 34 XX XX XX | 1E×7 | 61 90 01 01 00 04 00 00 [CRC]
+         └──── header ────┘ └── sys ID echo ───────┘  pad  └────── config ────────────┘
+
+  ⚠  System ID sent in PLAINTEXT. Bytes 27-28 = key identifier (visible in clear).
+
+═══════════════════════════════════════════════════════════════════════════
+                                  ↓
+═══════════════════════════════════════════════════════════════════════════
+  ▸ PHASE 2 — NONCE EXCHANGE (CHALLENGE)
+    Lock emits 8 random bytes — the challenge nonce
+═══════════════════════════════════════════════════════════════════════════
+
+  [K→L]  82 00 02 08 00 [CRC]
+         └─ read memory ─┘
+
+  [L→K]  00 02 11 08 | DC AF E0 29 A9 9C 5B 95 | [CRC]
+         └── header ──┘ └──── 8-byte nonce ─────┘
+
+  ✓  7 captures: all unique nonces, mean pairwise Hamming ≈ 50.1% — proper RNG.
+
+═══════════════════════════════════════════════════════════════════════════
+                                  ↓
+═══════════════════════════════════════════════════════════════════════════
+  ▸ PHASE 3 — ENCRYPTED AUTHENTICATION PAYLOAD
+    24-byte ciphertext + 8-byte plaintext zeros + trailing byte
+═══════════════════════════════════════════════════════════════════════════
+
+  [K→L]  82 00 03 0A 20 | [════════ 24B ciphertext ════════] | 00×8 | [CRC]
+         └── header ───┘ └── dynamic, per-session ─────────┘ └─ pt ─┘
+
+         AES-128 in stream-compatible mode (CTR / CBC-zero-pad / CBC-CTS /
+         single-block CBC). Cannot distinguish without chosen-plaintext.
+
+  [L→K]  ACCEPT:  00 03 11 18 [24 zero bytes] 50  → proceed to Phase 4
+         REJECT:  00 03 21 00 58                  → authentication failed
+
+  ⚠  8 zero bytes are PLAINTEXT padding (static across all 23 captures).
+  ✓  A rejection was captured in prev_pkt2 — lock actively validates this data.
+
+═══════════════════════════════════════════════════════════════════════════
+                                  ↓
+═══════════════════════════════════════════════════════════════════════════
+  ▸ PHASE 4 — MAC VERIFICATION
+    22-byte MAC — likely 20B SHA-1 + 2B device status
+═══════════════════════════════════════════════════════════════════════════
+
+  [K→L]  82 00 04 80 15 | [══════════ 20B SHA-1 ══════════] | [2B status]
+         └── header ───┘ └── matches DS28EC20 Compute MAC ──┘
+
+         Statistical properties (n=6 paired sessions):
+           Mean Hamming distance:      50.04%   (ideal: 50%)
+           Per-bit flip probability:   0.5004   (ideal: 0.5000)
+
+  [L→K]  00 04 11 02 01 01 63  →  motor activates, key can be turned
+
+═══════════════════════════════════════════════════════════════════════════
+
+  Sources: 23 captures (2014-2024) — Uni Rostock IuK prior research + 2024
+  Saleae captures. Stats over 6-7 paired (nonce, MAC) sessions.
+  System ID last 3 digits redacted for responsible disclosure.
+```
 
 ### 3.1 Packet Format
 
 Every packet starts with a 2-byte header:
 
-- Commands (key to lock): `82 00 <sequence> <type> [data...] [CRC]`
-- Responses (lock to key): `00 <sequence> <type> [data...] [CRC]`
+- Commands (key → lock): `82 00 <sequence> <type> [data…] [trailing byte]`
+- Responses (lock → key): `00 <sequence> <type> [data…] [trailing byte]`
 
-The sequence number increments from `01` to `04` across the four phases.
+The sequence number increments from `01` to `04` across the four phases. The trailing byte at the end of each packet is checksum-like (see [§4.3](#43-trailing-checksum-byte) for what we can and cannot say about it).
 
 ### 3.2 The Four Phases
 
-**Phase 1: Identity exchange**
+#### Phase 1 — Identity exchange
 
 The key sends a 33-byte identity packet containing:
-- The system number `V1004261` in ASCII (plaintext, 8 bytes)
+
+- The system number `V1004XXX` in ASCII (plaintext, 8 bytes — last 3 digits redacted in this document for responsible disclosure)
 - 7 bytes of padding (`1E 1E 1E 1E 1E 1E 1E`)
 - A configuration byte (`41` or `61` depending on direction)
-- 6 bytes of counter/key-ID area
+- 6 bytes of counter / key-ID area
 
 The lock responds by echoing back a similar identity block. Both sides now know who they are talking to.
 
 ```
-Key -> Lock:  82 00 01 01 1B 03 56 31 30 30 34 32 36 31
-                                      V  1  0  0  4  2  6  1
-              1E 1E 1E 1E 1E 1E 1E 41 02 00 08 01 04 [counter] [CRC]
+Key → Lock:  82 00 01 01 1B 03 56 31 30 30 34 XX XX XX
+                                      V  1  0  0  4  [redacted]
+              1E 1E 1E 1E 1E 1E 1E 41 02 00 08 01 04 [counter] [trailing]
 
-Lock -> Key:  00 01 11 18 03 56 31 30 30 34 32 36 31
-              1E 1E 1E 1E 1E 1E 1E 61 90 01 01 00 04 00 00 D2
+Lock → Key:  00 01 11 18 03 56 31 30 30 34 XX XX XX
+              1E 1E 1E 1E 1E 1E 1E 61 90 01 01 00 04 00 00 [trailing]
 ```
 
-**Phase 2: Nonce exchange (challenge)**
+#### Phase 2 — Nonce exchange (challenge)
 
-The key sends a short read-memory command. The lock responds with 8 random bytes plus a CRC byte. These 8 bytes are the challenge nonce.
+The key sends a short read-memory command. The lock responds with 8 random bytes plus a trailing byte. These 8 bytes are the challenge nonce.
 
 ```
-Key -> Lock:  82 00 02 08 00 74        (read memory command)
-Lock -> Key:  00 02 11 08 [8 nonce bytes] [CRC]
+Key → Lock:  82 00 02 08 00 [trailing]            (read memory command)
+Lock → Key:  00 02 11 08 [8 nonce bytes] [trailing]
 ```
 
-Here are the actual nonces observed across 7 sessions that had this phase fully captured:
+Across 7 sessions where this phase was fully captured, the nonces are:
 
 ```
 Session     Nonce (8 bytes)
@@ -107,25 +267,26 @@ prev_key1   5D AC 04 FD D7 C8 73 0D
 prev_key2   3F 03 5D DE 62 AC 1A 7D
 ```
 
-All 7 nonces are unique. Every single byte position has 7 unique values out of 7 samples. The pairwise Hamming distance between nonces averages 50.1%, which is what you would expect from properly random data. So the nonce generation looks solid.
+All 7 nonces are unique. Every single byte position has 7 unique values out of 7 samples. The pairwise Hamming distance between nonces averages 50.1%, which is what you would expect from properly random data. **The nonce generation looks solid.**
 
-**Phase 3: Authentication data (encrypted payload)**
+#### Phase 3 — Authentication data (encrypted payload)
 
 The key sends a 38-byte packet containing encrypted data. The structure is:
 
 ```
-82 00 03 0A 20 [24 bytes encrypted] [8 bytes zeros] [CRC]
+82 00 03 0A 20 [24 bytes ciphertext] [8 bytes zeros] [trailing byte]
 ```
 
-The 24 encrypted bytes change every session. The 8 zero bytes are always all zeros in every single capture across 10 years. The CRC byte at the end changes per session.
+The 24 encrypted bytes change every session. The 8 zero bytes are always `00 00 00 00 00 00 00 00` in every single capture across 10 years. The trailing byte changes per session.
 
 The lock responds with either:
+
 - `00 03 11 18 [24 zero bytes] 50` if it accepts (proceeds to Phase 4)
 - `00 03 21 00 58` if it rejects (authentication failed, session ends)
 
-We actually captured a rejection in one of the previous research sessions, which confirms the lock actively validates this data.
+A rejection was captured in `prev_pkt2`, confirming the lock actively validates this data.
 
-**Phase 4: MAC verification**
+#### Phase 4 — MAC verification
 
 The key sends a 27-byte packet containing the authentication hash:
 
@@ -135,177 +296,229 @@ The key sends a 27-byte packet containing the authentication hash:
 
 The lock responds with a final status. If everything checks out, the lock motor activates and the key can be turned.
 
-Here are the MACs from 6 complete sessions:
+The 6 complete MACs captured:
 
 ```
 Session     MAC (22 bytes, first 10 shown)
 ─────────   ──────────────────────────────────────
-prev_pkt1   85 72 D1 57 FE BA 71 F5 E4 CE ...
-prev_pkt4   E2 D1 45 F3 EA 9D C0 56 6B DD ...
-prev_pkt5   EA 1D 3E 1F D1 66 59 43 FC 8A ...
-prev_pkt6   09 AC 88 96 89 6D E0 0C 44 AA ...
-prev_key1   72 F8 16 1C 57 A6 13 E3 74 7F ...
-prev_key2   4E B4 A8 B9 23 3B 09 A5 99 3F ...
+prev_pkt1   85 72 D1 57 FE BA 71 F5 E4 CE …
+prev_pkt4   E2 D1 45 F3 EA 9D C0 56 6B DD …
+prev_pkt5   EA 1D 3E 1F D1 66 59 43 FC 8A …
+prev_pkt6   09 AC 88 96 89 6D E0 0C 44 AA …
+prev_key1   72 F8 16 1C 57 A6 13 E3 74 7F …
+prev_key2   4E B4 A8 B9 23 3B 09 A5 99 3F …
 ```
+
+---
 
 ## 4. Identifying the Cryptographic Algorithm
 
-### 4.1 Evidence for SHA-1
+### 4.1 Evidence for SHA-1 (Authentication MAC)
 
-Several things point to SHA-1 as the authentication hash:
+The 22-byte MAC is consistent with the DS28EC20 `Compute MAC` command, which returns 20 bytes of SHA-1 output followed by a 2-byte device-status field. Three independent lines of evidence support this:
 
-First, the protocol commands match the command set of the Maxim/Dallas DS28EC20, a 1-Wire EEPROM chip with built-in SHA-1 authentication. The `doc/` folder from the earlier research at Uni Rostock actually contains the DS28EC20 datasheet. The command structure we see in the captures lines up almost exactly with the DS28EC20's read-memory, write-scratchpad, and compute-MAC operations.
+1. **Command structure matches DS28EC20.** The Phase-4 command `82 00 04 80 15 [22 bytes]` matches the DS28EC20 datasheet's `Compute MAC` operation, and the Phase-2 `82 00 02 08 00` matches `Read Memory`. The DS28EC20 is a Maxim/Dallas 1-Wire EEPROM with built-in SHA-1 authentication engine; the earlier Uni Rostock research files include the DS28EC20 datasheet.
 
-Second, the MAC is 22 bytes long. SHA-1 produces a 20-byte (160-bit) hash. The extra 2 bytes are device status bytes appended by the DS28EC20 hardware after the SHA-1 digest. Advanced entropy analysis confirms this structure:
+2. **MAC length is 20+2 bytes.** SHA-1 produces a 20-byte (160-bit) digest. The extra 2 bytes are device status bytes appended by the DS28EC20 hardware. Entropy analysis of the 22-byte MAC across sessions:
+   - MAC[0] through MAC[19]: all show 6/6 unique values across the 6 sessions (full entropy)
+   - MAC[20]: 5/6 unique values (reduced entropy — consistent with device metadata)
+   - MAC[21]: per-bit flip probability = 0.367 (well below the ideal 0.5 — further evidence of non-hash data)
 
-- MAC[0] through MAC[19]: all show 6/6 unique values across sessions (full entropy)
-- MAC[20]: shows only 5/6 unique values (reduced entropy — consistent with device metadata)
-- MAC[21]: per-bit flip probability = 0.367 (well below the ideal 0.5 — further evidence of non-hash data)
+3. **Statistical properties of the first 20 MAC bytes match SHA-1.**
 
-This 20+2 structure matches the DS28EC20 datasheet, which specifies that the `Compute MAC` command returns 20 bytes of SHA-1 output followed by a 2-byte device status field.
+   | Metric | Measured | Expected for good hash |
+   |--------|----------|------------------------|
+   | Mean Hamming distance between MAC pairs (22 bytes) | **50.04%** | ~50% |
+   | Mean Hamming distance (MAC[0:20] only) | **51.12%** | ~50% |
+   | Per-bit flip probability (22 bytes) | **0.5004** | 0.5000 |
+   | MAC byte entropy | **6.55 bits/byte** | ~8.0 bits/byte |
+   | MAC[0:20] bytes dynamic | 20/20 fully unique | yes |
+   | MAC[20:22] bytes | reduced entropy | expected for device metadata |
 
-Third, and most importantly, the statistical properties of the first 20 MAC bytes match what you would expect from SHA-1. Here is what we measured:
+   The Hamming distance of 50.04% and per-bit flip probability of 0.5004 are textbook. For a well-behaved cryptographic hash, when you change the input, roughly half the output bits should flip. That is exactly what we see.
 
-| Metric | Measured | Expected for good hash |
-|--------|----------|----------------------|
-| Mean Hamming distance between MAC pairs | **50.0%** | ~50% |
-| Per-bit flip probability (pairwise) | **0.5004** | 0.5000 |
-| MAC byte entropy | **6.55 bits/byte** | ~8.0 bits/byte |
-| MAC[0:20] bytes dynamic | 20/20 fully unique | yes |
-| MAC[20:22] bytes | reduced entropy | expected for device metadata |
+> **Correction from v1.** An earlier version of this analysis claimed a fourth line of evidence: "the `0x33` Compute SHA command was found in the protocol." This is **false**. The byte `0x33` appears exactly once in the entire raw data stream (1,434 bytes), and not in a command position. The four commands actually used in the protocol are `0x01` (identity), `0x08` (read memory), `0x0A` (auth data), and `0x80` (compute MAC). The false claim originated from a duplicate-key bug in `scripts/analyze_captures.py:125-143` where the `known_commands` dict had `'33'` as a key twice. The bug is fixed in this version. See [§10](#10-corrected-claims-from-v1).
 
-The Hamming distance of exactly 50.0% and per-bit flip probability of 0.5004 are basically textbook. For a well-behaved cryptographic hash, when you change the input, roughly half the output bits should flip. That is exactly what we see.
-
-### 4.2 Evidence for AES-128-CTR on the Encrypted Payload
+### 4.2 Evidence for AES-128 on the Encrypted Payload (Mode Undetermined)
 
 ASSA ABLOY states in their product documentation that CLIQ uses 128-bit AES. Looking at the captured data:
 
-- The encrypted payload is exactly 24 bytes of ciphertext followed by 8 bytes of static zeros. Crucially, 24 + 8 = 32 bytes = exactly 2 AES-128 blocks.
-- The 24 bytes of ciphertext are NOT block-aligned (1.5 blocks), which is natural for AES-CTR (counter mode) since CTR generates a keystream that can encrypt arbitrary byte lengths.
-- The 8 zero bytes are unencrypted protocol padding, not ciphertext. If AES-CBC were used, standard PKCS#7 padding would produce 32 bytes of ciphertext — but we observe only 24 bytes of ciphertext plus 8 plaintext zeros. This contradiction rules out AES-CBC with standard padding.
-- No repeated 16-byte blocks were found within any single capture, which rules out ECB mode.
-- Some block patterns repeat across captures, but only in the plaintext framing around the encrypted section, not in the ciphertext itself.
+- The encrypted payload is exactly 24 bytes of ciphertext followed by 8 bytes of static zeros. 24 + 8 = 32 bytes = exactly 2 AES-128 blocks.
+- The 24 bytes of ciphertext are **NOT** block-aligned (1.5 blocks), which is natural for AES-CTR (counter mode) since CTR generates a keystream that can encrypt arbitrary byte lengths.
+- The 8 zero bytes are unencrypted protocol padding, **not** ciphertext. If AES-CBC + PKCS#7 were used, standard padding would produce 32 bytes of ciphertext — but we observe only 24 bytes of ciphertext plus 8 plaintext zeros. This contradiction rules out **AES-CBC + PKCS#7**.
+- No repeated 16-byte blocks were found within any single capture, which **weakly** argues against ECB (but n=7 captures is far too small to strongly rule out ECB — reliably detecting ECB requires ~2³² captures for 16-byte blocks).
 
-The block boundary alignment analysis:
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║   Phase-3 Payload — 32 Bytes = 2 × AES-128 Block Boundaries               ║
+╚══════════════════════════════════════════════════════════════════════════╝
 
-![AES-128 Block Boundary Alignment](assets/aes_block_alignment.png)
+  Byte:   0        8        16       24       32
+          │        │        │        │        │
+          ▼        ▼        ▼        ▼        ▼
+         ┌──────────────────┬──────────────────┬────┐
+         │  CIPHERTEXT 24B  │ PLAINTEXT ZEROS  │ ?? │
+         │ dynamic/session  │  static 0x00×8   │    │
+         └──────────────────┴──────────────────┴────┘
+          ├── Block 1 (16B) ─┤├── Block 2 (16B) ─┤
+          └───────────────────┴───────────────────┘
+                     2 × AES-128 blocks
 
-The actual ciphertext portion is hard to isolate precisely because it is mixed in with protocol framing bytes. Out of the 89-byte region initially suspected to be "encrypted" (bytes 87-175 in the raw stream), only about 24 bytes are actually ciphertext. The rest is plaintext protocol data that happens to sit in the same area.
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  KEY OBSERVATION: 24-byte ciphertext is NOT block-aligned            │
+  │                                                                      │
+  │  • 24 + 8 = 32 bytes = exactly 2 AES-128 blocks                      │
+  │  • 8 zero bytes are PLAINTEXT (always 0x00 across all captures)      │
+  │  • Standard CBC+PKCS#7 would produce 32B ct, not 24B ct + 8B pt      │
+  └──────────────────────────────────────────────────────────────────────┘
 
-**Mode determination: AES-128-CTR is most likely.** CBC is ruled out because standard CBC+PKCS#7 would transmit 32 bytes of ciphertext, not 24 ciphertext + 8 plaintext zeros.
+  MODE CONSISTENCY ANALYSIS
+═══════════════════════════════════════════════════════════════════════════
 
-### 4.3 CRC-8 for Error Detection
+  ✓ CONSISTENT (cannot be ruled out passively):
+    • AES-CTR                      — stream mode, 8 zeros are pt framing
+    • AES-CBC + zero-padding       — last 8B ct decrypts to 0; discarded
+    • AES-CBC-CTS (NIST 800-38A)   — ciphertext stealing, no padding
+    • Single-block AES-CBC + 8B unencrypted metadata
+    • AES-ECB                      — cannot rule out at n=7
 
-The protocol uses CRC-8/MAXIM for data integrity on the bus. This is standard for 1-Wire and has nothing to do with security. The CRC polynomial and implementation were already identified in the previous research at Uni Rostock (see `patterns.php` in `data/previous_research/`).
+  ✗ REJECTED by observations:
+    • AES-CBC + PKCS#7 padding     — would produce 32B ct, not 24+8
+
+═══════════════════════════════════════════════════════════════════════════
+
+  VERDICT: AES mode cannot be determined passively.
+  Distinguishing CTR vs CBC-zero-pad vs CBC-CTS requires:
+    (a) chosen-plaintext captures (block independence test), or
+    (b) side-channel analysis (counter vs chaining detection).
+```
+
+**Mode determination: AES-128 in some stream-compatible mode.** Multiple modes are consistent with the observed 24 ct + 8 pt-zero structure:
+
+| Mode | Consistent? | Reason |
+|------|-------------|--------|
+| AES-CTR | ✓ | Stream mode, arbitrary length, 8 zeros are plaintext framing |
+| AES-CBC with zero-padding | ✓ | 24B padded to 32B; last 8B ct decrypts to zero; receiver discards |
+| AES-CBC-CTS (NIST SP 800-38A) | ✓ | Ciphertext stealing: 24B → 24B ct, no padding expansion |
+| Single-block AES-CBC + 8B unencrypted metadata | ✓ | First 16B encrypted, next 8B static protocol field |
+| AES-ECB | Cannot rule out | Detecting ECB requires ~2³² captures at 16-byte block size |
+| AES-CBC + PKCS#7 | ✗ | Would produce 32B ciphertext, not 24B ct + 8B pt zeros |
+
+The earlier version of this analysis concluded "AES-128-CTR most likely." This is softened here to: **"AES-128 in some stream-compatible mode (CTR, CBC-zero-pad, CBC-CTS, or single-block CBC). Standard CBC+PKCS#7 is unlikely. Distinguishing the remaining candidates requires either chosen-plaintext captures (to test block independence) or side-channel analysis (to detect counter vs. chaining operations)."**
+
+### 4.3 Trailing Checksum Byte
+
+A trailing byte appears at the end of every packet in the protocol. The earlier version of this analysis stated: *"The protocol uses CRC-8/MAXIM for data integrity on the bus. This is standard for 1-Wire."*
+
+**This claim is not supported by the data.** A brute-force search was performed over the entire 2¹⁷ CRC-8 parameter space (polynomial × initial value × final XOR × reflect-input × reflect-output) against 7 known (Phase-3 payload, trailing byte) pairs and 7 known (Phase-2 nonce packet, trailing byte) pairs. **Zero CRC-8 variants match any plausible input combination.** The `patterns.php` extra-zero-pass variant was also tested and does not match. Simple XOR, sum-8, and two's-complement-sum-8 checksums were also tested and do not match.
+
+The trailing byte is therefore **unidentified**. Plausible candidates that have not yet been ruled out include:
+
+- A non-standard CRC variant with bit-reversal or initial/final transforms not covered by the standard parameter space
+- A truncated hash
+- A sequence-derived value (e.g., derived from session counter state)
+- A polynomial division with a non-standard width or final shift
+
+For the purpose of this analysis, the trailing byte should be treated as **"a per-packet byte whose specific algorithm has not been identified."** It is not relevant to the cryptographic security of the protocol (it provides error detection at most, not authentication) — but the inability to identify it is a quality gap in the analysis that should be filled before any "conference-grade" claim is made. See [`scripts/crc_bruteforce_v2.py`](scripts/crc_bruteforce_v2.py) for the search code. The full results are saved to `crc_bruteforce_results.json` in the repo root after running the script.
 
 ### Algorithm Identification Summary
 
 | Component | Algorithm | Confidence | Evidence |
 |-----------|-----------|------------|----------|
-| Authentication hash | **SHA-1** | High | MAC Hamming distance = 50.0% (textbook ideal), 20-byte hash + 2-byte device status matches DS28EC20 spec, `Compute SHA` command present |
-| Payload encryption | **AES-128-CTR** | Medium-High | ASSA ABLOY claims 128-bit AES, 24-byte ciphertext (non-block-aligned → CTR mode), no ECB pattern, 24+8=32 byte block boundary alignment |
-| Error detection | **CRC-8/MAXIM** | Confirmed | Polynomial identified in previous research, matches all packets |
+| Authentication MAC | **SHA-1** (20B) + 2B device status | **High** | MAC Hamming distance 50.04%, per-bit flip 0.5004, 20+2 structure matches DS28EC20 `Compute MAC` spec, command `0x80` matches DS28EC20 |
+| Payload encryption | **AES-128** in stream-compatible mode | **Medium** | ASSA ABLOY claims AES-128; 24B ct + 8B pt zeros rules out CBC+PKCS#7; CTR, CBC-zero-pad, CBC-CTS, or single-block CBC all consistent. Cannot distinguish without chosen-plaintext. |
+| Trailing checksum byte | **Unidentified** | **Low** | Brute-force over 2¹⁷ CRC-8 variants + simple checksums: zero matches. Not CRC-8/MAXIM as previously claimed. |
+| Error detection | Trailing byte (algorithm TBD) | — | Provides at most error detection, not authentication. Not security-relevant. |
+
+---
 
 ## 5. Differential Cryptanalysis Results
 
-This is where things get interesting. With 23 sessions in hand, we can do proper differential analysis to look for weaknesses in the implementation.
+With 23 sessions in hand, differential analysis can be applied to look for weaknesses in the implementation. **The sample size is the dominant caveat throughout this section** — see [§9](#9-limitations).
 
 ### 5.1 Pairwise Output Independence Analysis
 
-**Terminology note:** This section measures *pairwise output independence* (whether random inputs produce ~50% bit differences in outputs), not the *Strict Avalanche Criterion* (SAC). True SAC testing requires chosen-input pairs differing in exactly 1 bit, which is impossible with passive captures — it would require injecting chosen nonces into the lock hardware. Our nonce pairs differ by ~32 bits on average (50.1% of 64 bits), so what we measure is output uniformity across random multi-bit differentials.
+> **Terminology.** This section measures *pairwise output independence* (whether random inputs produce ~50% bit differences in outputs), not the *Strict Avalanche Criterion* (SAC). True SAC testing requires chosen-input pairs differing in exactly 1 bit, which is impossible with passive captures — it would require injecting chosen nonces into the lock hardware. Our nonce pairs differ by ~32 bits on average (50.1% of 64 bits), so what we measure is output uniformity across random multi-bit differentials.
 
-We compared the challenge nonces (Phase 2 input) against the MACs (Phase 4 output) across all pairs to check pairwise output independence. When the challenge changes, how much does the MAC change?
+We compared the challenge nonces (Phase-2 input) against the MACs (Phase-4 output) across all 6 paired sessions to check pairwise output independence. When the challenge changes, how much does the MAC change?
 
 | Challenge difference | MAC change | Expected |
 |---------------------|------------|----------|
-| 0 bits (same challenge) | 37-47% of MAC bits flip | ~50% (other inputs differ) |
-| 8 bits changed | 31-42% flip | ~50% |
-| 71-73 bits changed | 31-51% flip | ~50% |
+| 0 bits (same challenge) | not observed | ~50% (other inputs differ) |
+| 8 bits changed | 31–42% flip | ~50% |
+| 71–73 bits changed | 31–51% flip | ~50% |
 
-Advanced bit-level analysis across the 6 paired nonce/MAC sessions shows:
+Bit-level analysis across the 6 paired nonce/MAC sessions:
 
 | Metric | Measured | Ideal |
 |--------|----------|-------|
 | Mean MAC bit-flip probability | **0.5004** | 0.5000 |
-| Mean MAC Hamming distance | **50.0%** | 50.0% |
-| Input-Δ vs Output-Δ correlation | **r = -0.069** | 0.000 |
+| Mean MAC Hamming distance | **50.04%** | 50.0% |
+| Input-Δ vs Output-Δ correlation | **r = −0.069** | 0.000 |
 | Bits with extreme bias (<0.2 or >0.8) | 7/176 (4.0%) | ~0% |
 
-The per-bit flip probability of 0.5004 is textbook perfect. The output differential is completely independent of the input differential magnitude (r = -0.069 ≈ 0), which is exactly what a proper cryptographic hash should exhibit.
+The per-bit flip probability of 0.5004 is textbook. The output differential is statistically independent of the input differential magnitude (r = −0.069 ≈ 0), which is what a proper cryptographic hash should exhibit.
 
-The MAC changes are in the right ballpark but skew slightly low (averaging 40.7% rather than the ideal 50%) when measured across all 15 captures (including those without paired nonce data). This mild bias is worth noting but not necessarily a fatal flaw.
+### 5.2 Nonce-to-MAC Correlation Analysis
 
-However, there is one very interesting case: captures 4 and 9 in our original dataset produced **identical MAC output with 0% difference**. This could mean they are duplicate captures of the same event, or it could mean there was a nonce collision. We cannot tell for certain without more data.
+We extracted the nonce bytes and the corresponding MAC bytes from the 6 sessions where both were fully captured, then computed Pearson correlations between each nonce byte position and each MAC byte position (8 × 22 = 176 tests). For a strong hash function, no meaningful linear correlation should exist.
 
-### 5.2 Nonce-to-MAC Correlation Analysis (Resolved — Statistical Artifact)
+**Statistical method.** p-values are computed exactly via the regularized incomplete beta function (Student's t distribution with df=4). The earlier version of this analysis used a 14-entry lookup table with log-linear interpolation; that approximation has been replaced with the exact computation in [`scripts/v2_statistics.py`](../scripts/v2_statistics.py).
 
-We extracted the nonce bytes and the corresponding MAC bytes from sessions where both were fully captured, then computed Pearson correlations between each nonce byte position and each MAC byte position.
+| Input | Output | Correlation (r) | p (exact, uncorrected) | p (Bonferroni) | Verdict |
+|-------|--------|-----------------|------------------------|----------------|---------|
+| Nonce[3] | MAC[4] | **−0.939** | 0.0054 | 0.956 | Spurious |
+| Nonce[4] | MAC[11] | **−0.909** | 0.0122 | 1.000 | Spurious |
+| Nonce[5] | MAC[19] | **+0.884** | 0.0194 | 1.000 | Spurious |
+| Nonce[5] | MAC[14] | **−0.884** | 0.0194 | 1.000 | Spurious |
+| Nonce[4] | MAC[14] | **−0.881** | 0.0203 | 1.000 | Spurious |
+| Nonce[0] | MAC[21] | **−0.843** | 0.0351 | 1.000 | Spurious |
+| Nonce[6] | MAC[6] | **+0.824** | 0.0438 | 1.000 | Spurious |
 
-For a strong hash function, there should be no meaningful linear correlation between any input byte and any output byte. Initial (uncorrected) analysis found 7 correlations with |r| > 0.811:
+**Uncorrected significant correlations (p < 0.05): 7.** Under the null hypothesis of zero true correlation, with 176 simultaneous tests, the expected number of false positives is 176 × 0.05 = **8.8**. The observed 7 is well within the normal range.
 
-| Input | Output | Correlation (r) | p (uncorrected) | p (Bonferroni) | Verdict |
-|-------|--------|-----------------|-----------------|----------------|---------|
-| Nonce byte 3 | MAC byte 4 | **-0.94** | 0.005 | 0.962 | Spurious |
-| Nonce byte 4 | MAC byte 11 | **-0.91** | 0.012 | 1.000 | Spurious |
-| Nonce byte 5 | MAC byte 19 | **+0.88** | 0.019 | 1.000 | Spurious |
-| Nonce byte 5 | MAC byte 14 | **-0.88** | 0.019 | 1.000 | Spurious |
-| Nonce byte 4 | MAC byte 14 | **-0.88** | 0.020 | 1.000 | Spurious |
-| Nonce byte 0 | MAC byte 21 | **-0.84** | 0.036 | 1.000 | Spurious |
-| Nonce byte 6 | MAC byte 6 | **+0.82** | 0.044 | 1.000 | Spurious |
+**Bonferroni-corrected significant correlations: 0.** With α_individual = 0.05/176 = 0.000284, no correlations survive. The same result holds under Benjamini-Hochberg FDR at q = 0.05.
 
-**However, these correlations are a statistical artifact of multiple hypothesis testing (the "look-everywhere effect").** Here is why:
+**Power analysis.** At n = 6 paired samples, df = 4, and Bonferroni-corrected α = 0.000284:
 
-With n=6 paired samples and df=4, the critical |r| at α=0.05 is 0.811. We tested 176 independent pairs (8 nonce bytes × 22 MAC bytes). Under the null hypothesis of zero true correlation:
+| Power | Minimum detectable \|r\| |
+|-------|--------------------------|
+| 0.50 | 0.970 |
+| 0.80 | **0.989** |
+| 0.90 | 0.993 |
+| 0.95 | 0.996 |
 
-- **Expected false positives**: 176 × 0.05 = **8.8 correlations**
-- **Observed**: **7 correlations** (fewer than expected from pure noise)
-- **Monte Carlo validation** (10,000 random trials): 9.1 ± 3.0 expected from chance
-- **Probability of ≥7 by chance**: **80.6%** (completely unremarkable)
+Power to detect a true correlation of |r| = 0.9 is only **0.14** (14%). Power to detect |r| = 0.7 is **0.017** (1.7%). Power to detect |r| = 0.5 is **0.004** (0.4%).
 
-After applying **Bonferroni correction** for 176 simultaneous tests (α_individual = 0.05/176 = 0.000284, requiring |r| > 0.985):
+**Verdict.** At n = 6 with Bonferroni correction, the test is **severely underpowered**. The correct framing of the result is not "no correlations exist" but rather: *"we cannot reject the null hypothesis of zero correlation, but we also cannot rule out linear correlations weaker than |r| ≈ 0.99. Stronger claims about hash input-output independence require a larger sample."*
 
-| Correction method | Correlations surviving |
-|-------------------|----------------------|
-| Bonferroni (α/176) | **0** |
-| Benjamini-Hochberg FDR (q=0.05) | **0** |
+The earlier version of this analysis described the apparent correlations as a "statistical artifact." That phrasing is too strong; the correct phrasing is "insufficient evidence to claim correlation."
 
-**Zero correlations survive any proper multiple-testing correction.**
+### 5.3 XOR Differential Analysis (with disjoint pairs)
 
-The initial assessment that "you would expect maybe 0 or 1 correlations above |r| = 0.8 by chance" was incorrect — it failed to account for the 176 simultaneous tests. In fact, ~8.8 is the correct expectation, and our observed 7 is well within the normal range.
+> **Methodological correction from v1.** The earlier version applied the chi-squared test to the bytes of all C(n, 2) overlapping pairwise XOR differentials. Those bytes are not IID (each capture appears in n−1 pairs), so the chi-squared assumption is violated and the resulting p-values are anti-conservative. This version uses **disjoint pairs** only (i, i+1 for i = 0, 2, 4, …), yielding n/2 independent XOR differentials. For n = 6, that is 3 disjoint pairs.
 
-This resolves what was previously listed as a high-severity weakness. The hash function shows no measurable linear bias between input and output bytes.
+We XOR'ed pairs of captures in the MAC section and analyzed the distribution of the resulting differential bytes.
 
-### 5.3 XOR Differential Analysis
+**MAC section (22 bytes), disjoint pairs (n = 3 pairs → 66 bytes):**
 
-We XOR'ed all pairs of captures in the encrypted payload and MAC sections, then analyzed the distribution of the resulting differential bytes.
+| Metric | v1 (overlapping, 15 pairs) | v2 (disjoint, 3 pairs) |
+|--------|---------------------------|------------------------|
+| Sample size | 330 bytes | 66 bytes |
+| Chi-squared statistic | 264.2 | 252.1 |
+| Threshold (df=255, α=0.05) | 293.25 | 293.25 |
+| Verdict | "non-random" (just under threshold) | "uniform" (well under threshold) |
+| Reliable? | No (overlapping samples) | **No — expected count per byte = 66/256 = 0.26 ≪ 5** |
 
-**MAC section (22 bytes):**
+**The chi-squared test is unreliable at this sample size.** The rule of thumb is that expected count per category should be ≥ 5; here it is 0.26, more than an order of magnitude below. The v1 "chi-squared = 7313, far above threshold, therefore non-random" conclusion was doubly invalid: overlapping samples violated IID, and even with disjoint pairs the sample size is too small for the test to mean anything.
 
-| Metric | Value | What random would look like |
-|--------|-------|----------------------------|
-| Zero bytes in XOR differential | 15.1% | ~0.4% |
-| Chi-squared statistic | 7313 | < 293 |
-| Repeated differential patterns | 8 found | 0 expected |
-
-The 15.1% zero-byte rate tells us that roughly 3-4 bytes out of the 22-byte MAC section are static across sessions. Those bytes are probably not hash output. They are likely command framing bytes that got included in the "MAC section" during our initial byte-range selection.
-
-**Encrypted payload (24 data bytes + 8 zero bytes + 1 CRC):**
-
-| Metric | Value | What random would look like |
-|--------|-------|----------------------------|
-| Static bytes | 8 out of 33 (24.2%) | 0% |
-| Dynamic bytes | 25 out of 33 (75.8%) | 100% |
-| Zero padding | Always 8 bytes of 0x00 | N/A |
-
-The 8 constant zero bytes are plaintext, not ciphertext. They are always there, every session, across all 23 captures. This means the actual encrypted data is only 24 bytes. The CRC changes per session but is computed over the plaintext + ciphertext, so it is not random either.
+The informal observation that "3–4 bytes out of the 22-byte MAC section are static across sessions" is still plausible — those bytes are probably command framing bytes that got included in the "MAC section" during byte-range selection, not hash output. But this conclusion rests on direct inspection of byte values across captures, not on the chi-squared test.
 
 ### 5.4 Block Cipher Mode
 
-We checked whether the encryption uses ECB mode (which would show repeated ciphertext blocks for identical plaintext blocks):
-
-- No 16-byte block repeats within any single session. ECB mode is ruled out.
-- No 8-byte block repeats either. DES-ECB is also ruled out.
-- The mode is most likely AES-128-CTR (counter mode), as established in Section 4.2.
+- No 16-byte block repeats within any single session. ECB mode is weakly argued against (but n = 7 is far too small to strongly rule out — see [§4.2](#42-evidence-for-aes-128-on-the-encrypted-payload-mode-undetermined)).
+- No 8-byte block repeats either. DES-ECB is weakly argued against.
+- The mode is one of: AES-CTR, AES-CBC with zero-padding, AES-CBC-CTS, or single-block AES-CBC plus unencrypted metadata. Standard CBC+PKCS#7 is ruled out. See [§4.2](#42-evidence-for-aes-128-on-the-encrypted-payload-mode-undetermined) for the full enumeration.
 
 ### 5.5 Counter and Key Identification Bytes
 
@@ -313,16 +526,19 @@ The identity packet (Phase 1) contains a 6-byte field that partially changes bet
 
 ```
 prev_foo2_pkt1:  9C 14 46 04 1F 6F
-prev_foo2_pkt2:  9C 14 46 04 34 5A   <- same key, different session
-prev_key1:       95 14 E4 03 0B ED   <- different key
-prev_key2:       95 14 E4 03 16 E2   <- same different key, later session
-user1_session:   38 04 17 ...        <- 2024 capture
-user2_session:   96 02 07 ...        <- 2024 different key
+prev_foo2_pkt2:  9C 14 46 04 34 5A   ← same key, different session
+prev_key1:       95 14 E4 03 0B ED   ← different key
+prev_key2:       95 14 E4 03 16 E2   ← same different key, later session
+user1_session:   38 04 17 …           ← 2024 capture
+user2_session:   96 02 07 …           ← 2024 different key
 ```
 
-Bytes 0-1 of this field (`9C 14`, `95 14`, etc.) look like a key identifier. They stay the same within one key but differ between keys. Byte 2 changes slowly (maybe a day counter or access-right version). Bytes 3-4 change more rapidly (session counter or timestamp). Byte 5 looks like a CRC or checksum over the preceding bytes.
+- Bytes 0–1 of this field (`9C 14`, `95 14`, etc.) look like a **key identifier**. They stay the same within one key but differ between keys.
+- Byte 2 changes slowly (maybe a day counter or access-right version).
+- Bytes 3–4 change more rapidly (session counter or timestamp).
+- Byte 5 looks like a checksum byte over the preceding bytes.
 
-These are transmitted in the clear and could be used to track which key was used and when.
+These are transmitted in the clear and could be used to track which key was used and when. This is a privacy concern, not an authentication-security concern — see [§7.3](#73-key-identification-in-clear).
 
 ### 5.6 Same Key vs. Different Key MAC Comparison
 
@@ -331,12 +547,16 @@ If the secret key stored in the chip plays a role in the MAC computation (which 
 | Comparison | Mean Hamming distance (MAC) |
 |-----------|-----------------------------|
 | Same key (User 1, 8 captures) | 41.0% |
-| Same key (User 2, 2 captures) | 48.1% |
+| Same key (User 2, 2 captures) | 48.1% (a single pair — see note) |
 | Cross-key (User 1 vs User 2) | 39.9% |
 
-The distances are very similar across all comparisons. This tells us that the nonce (which changes every session) dominates the MAC output variation, not the per-key secret. The secret key contributes to the computation, but its effect is masked by the much higher entropy of the random nonce.
+> **Note on the User 2 row.** With only 2 User-2 captures, C(2, 2) = 1 pair, so "48.1%" is a single Hamming distance (85 of 176 bits). It is reported as a percentage for consistency but should not be over-interpreted.
 
-This is actually how challenge-response is supposed to work: the nonce should make every MAC unique regardless of the key. But it also means that from the MAC alone, you cannot easily tell which key produced it.
+The distances are very similar across all comparisons. The nonce (which changes every session) dominates the MAC output variation, not the per-key secret. The secret key contributes to the computation, but its effect is masked by the much higher entropy of the random nonce.
+
+This is actually how challenge-response is supposed to work: the nonce should make every MAC unique regardless of the key. But it also means that **from the MAC alone, you cannot easily tell which key produced it** — which is good for privacy, but also means MAC-traffic analysis cannot directly identify individual keys.
+
+---
 
 ## 6. Byte-Level Entropy Map
 
@@ -345,97 +565,219 @@ We computed the Shannon entropy at every byte position across all 23 captures. H
 ```
 Byte   Classification
 ─────  ──────────────────────────────────────────────────
-0-1    STATIC         Bus reset + start bytes (0xFF 0x5A)
-2-7    STATIC         Command header + type
-8-15   STATIC         System ID "V1004261" in plaintext
-16-22  STATIC         Padding bytes (1E 1E 1E 1E 1E 1E 1E)
-23-26  STATIC         Configuration byte + fixed bytes
-27-28  LOW ENTROPY    Key identifier (2 values across keys)
-29-32  MODERATE       Counter/timestamp area
-33-36  HIGH           Session-specific (CRC, nonce-derived)
-37-81  MIXED          Repeated identity + status exchanges
-82-86  BINARY         Challenge init command (alternates between 2 variants)
-87-106 MIXED          Protocol framing mixed with some dynamic data
-107-137 HIGH          Likely encrypted payload area
-138-175 MIXED         More protocol data + zero padding
-176-187 LOW           Command bytes + mode flags
-188-212 STATIC        Zero-padded memory page (all zeros)
-213-217 LOW           MAC frame header
-218-237 VERY HIGH     SHA-1 hash output (the actual authentication data)
-238-254 MIXED         Final verification bytes + status
+0–1    STATIC         Bus reset + start bytes (0xFF 0x5A)
+2–7    STATIC         Command header + type
+8–15   STATIC         System ID "V1004XXX" in plaintext
+16–22  STATIC         Padding bytes (1E 1E 1E 1E 1E 1E 1E)
+23–26  STATIC         Configuration byte + fixed bytes
+27–28  LOW ENTROPY    Key identifier (2 values across keys)
+29–32  MODERATE       Counter/timestamp area
+33–36  HIGH           Session-specific (trailing byte, nonce-derived)
+37–81  MIXED          Repeated identity + status exchanges
+82–86  BINARY         Challenge init command (alternates between 2 variants)
+87–106 MIXED          Protocol framing mixed with some dynamic data
+107–137 HIGH          Likely encrypted payload area
+138–175 MIXED         More protocol data + zero padding
+176–187 LOW           Command bytes + mode flags
+188–212 STATIC        Zero-padded memory page (all zeros)
+213–217 LOW           MAC frame header
+218–237 VERY HIGH     SHA-1 hash output (the actual authentication data)
+238–254 MIXED         Final verification bytes + status
 ```
 
-The important takeaway: only about 20-30 bytes out of the full 255-byte exchange are actually cryptographic output (hash or ciphertext). The rest is predictable protocol structure.
+The important takeaway: only about 20–30 bytes out of the full 255-byte exchange are actually cryptographic output (hash or ciphertext). The rest is predictable protocol structure.
+
+---
 
 ## 7. Identified Weaknesses
 
-| # | Weakness | Severity |
-|---|----------|----------|
-| 1 | System ID `V1004261` transmitted in plaintext every session | High |
-| 2 | No distance bounding, relay attack feasible (7.6ms round trip) | High |
-| 3 | Key identifier bytes (27-28) visible in cleartext | Medium |
-| 4 | 8 bytes of known plaintext (zero padding) in auth data | Medium |
-| 5 | Protocol unchanged for 10+ years (2014 same as 2024) | Medium |
-| 6 | Reject response `0x21` leaks authentication failure status | Low |
+| # | Weakness | Severity | Threat-model relevance |
+|---|----------|----------|------------------------|
+| 1 | System ID `V1004XXX` transmitted in plaintext every session | High | Tracking, system identification |
+| 2 | No distance bounding — relay attack feasible (7.6 ms round-trip) | High | Unauthorized unlock via relay |
+| 3 | Key identifier bytes (27–28) visible in cleartext | Medium | Tracking, key fingerprinting |
+| 4 | 8 bytes of known plaintext (zero padding) in auth data | Medium | Aids chosen-plaintext attack research |
+| 5 | Protocol unchanged for 10+ years (2014 same as 2024) | Medium | Long exposure window for any vulnerability found |
+| 6 | Reject response `0x21` leaks authentication failure status | Low | Timing oracle (very weak) |
+| 7 | Published (nonce, MAC) pairs enable offline brute-force attack research | Medium | Depends on secret length (see §7.4) |
 
-### 7.1 Plaintext System ID
+### 7.1 Plaintext System ID and Key Identifier
 
-The system number `V1004261` appears twice in every unlock session, at byte positions 8-15 and 49-56. It is transmitted as ASCII without any obfuscation. Anyone listening on the wire can identify which locking system the key belongs to.
+The system number `V1004XXX` appears twice in every unlock session, at byte positions 8–15 and 49–56 (the second occurrence is in the lock's identity echo). It is transmitted as ASCII without any obfuscation. Anyone listening on the wire can identify which locking system the key belongs to. This is a tracking vulnerability — an attacker with logic-analyzer access to one CLIQ installation can fingerprint it and recognize the same system elsewhere.
 
-### 7.2 No Distance Bounding
+The system ID has been partially redacted in this document (last 3 digits replaced with `XXX`) for responsible disclosure. The full system ID appears in the raw capture data under `data/previous_research/`.
 
-The full communication takes about 7.6 milliseconds. There is no timing constraint that would prevent a relay attack. An attacker with two devices (one near the key, one near the lock) connected by a fast link could relay the entire exchange in real time. The protocol does not check whether the response came back "too slowly" for a direct connection.
+### 7.2 No Distance Bounding (Relay Attack Feasible)
+
+The full communication takes about 7.6 milliseconds. There is no timing constraint that would prevent a relay attack. An attacker with two devices — one near the key, one near the lock — connected by a fast link (e.g., 433 MHz radio, or even a low-latency WiFi link) could relay the entire exchange in real time. The protocol does not check whether the response came back "too slowly" for a direct connection.
+
+This is the same attack class as documented against passive keyless-entry systems in automotive contexts (see [§11 Related Work](#11-related-work)). The defense — distance bounding ( Brands-Chaum or Hancke-Kuhn) — requires the protocol to enforce a strict round-trip time budget per challenge-response pair, which the CLIQ protocol does not do.
+
+This is the highest-impact weakness under the threat model in this document. **It does not require breaking any cryptography.** A pure relay of bytes unlocks the door.
 
 ### 7.3 Key Identification in Clear
 
-Bytes 27-28 of the identity packet effectively identify which key is being used. This means passive eavesdropping on the contact pin could tell you which specific key unlocked which door and when.
+Bytes 27–28 of the identity packet effectively identify which key is being used (see [§5.5](#55-counter-and-key-identification-bytes)). This means passive eavesdropping on the contact pin could tell you which specific key unlocked which door and when. For deployments where key usage is meant to be private (e.g., individual-employee activity), this is a privacy concern.
 
-### 7.4 Constant Zero Padding
+### 7.4 MAC and Nonce Publication
 
-The 8-byte zero block in the authentication data packet is known plaintext. In a chosen-plaintext attack scenario, this could help narrow down the encryption key, though in practice the attacker would also need control over other inputs.
+The 6 published (nonce, MAC) pairs in this repository are real captured data from a deployed CLIQ system. If the SHA-1 hypothesis is correct, each MAC is a deterministic function of (secret key, nonce, page data). An attacker with these pairs can perform an offline brute-force search over candidate secret keys:
 
-### 7.5 Nonce-to-MAC Correlations (Resolved)
+- For each candidate secret, compute the expected MAC for each known nonce using the DS28EC20 MAC algorithm
+- If all 6 match, the candidate is the real secret
+- Time complexity: 2^(secret_bit_length) MAC computations
 
-~~As initially reported in Section 5.2, apparent correlations between nonce bytes and MAC bytes were observed.~~ After applying Bonferroni correction for 176 simultaneous hypothesis tests, zero correlations survive (see Section 5.2). The observed correlations were a statistical artifact of the "look-everywhere effect" at small sample size (n=6). Monte Carlo simulation confirms that 9.1 ± 3.0 false positives are expected from pure random noise, and our observed count of 7 falls within this range. **This is not a cryptographic weakness.**
+The DS28EC20 secret length is documented as 4 bytes (32 bits) in older Maxim parts and longer in newer variants. At 32 bits, brute-forcing 6 (nonce, MAC) pairs is feasible on a single GPU in minutes. At 64+ bits, it is infeasible on commodity hardware. The actual secret length used by this specific CLIQ installation is **not known from passive captures** and depends on the chip revision deployed.
+
+This is a real consideration for publication. The (nonce, MAC) pairs in this repository are not synthetic — they are real. Researchers extending this work should treat them as such and should not publish any successful key-recovery result without vendor coordination.
+
+### 7.5 Constant Zero Padding
+
+The 8-byte zero block in the authentication data packet is known plaintext. In a chosen-plaintext attack scenario, this could help narrow down the encryption key, though in practice the attacker would also need control over other inputs. Under the passive-eavesdrop threat model, this is a low-impact observation — the zeros simply confirm that the encryption does not extend over the full 32-byte block boundary.
 
 ### 7.6 Unchanged Protocol Over 10 Years
 
-The protocol structure is identical between the 2014 captures and the 2024 captures. Same commands, same byte layout, same framing. There has been no protocol version upgrade in that time. This means any vulnerability found in the protocol applies to the entire installed base over at least a decade.
+The protocol structure is identical between the 2014 captures and the 2024 captures. Same commands, same byte layout, same framing. There has been no protocol version upgrade in that time. This means any vulnerability found in the protocol applies to the entire installed base over at least a decade. It also means the system has had no security-relevant protocol updates — a long exposure window for any weakness discovered now.
 
-## 8. Comparison with Published Information
+### 7.7 Reject Response Leaks Status
 
-ASSA ABLOY's marketing materials state that CLIQ uses "128-bit AES encryption" and that the system provides "high security against electronic manipulation." Our analysis broadly agrees that AES-128 is used for the 24-byte encrypted payload (most likely in CTR mode), but we also found that:
+The `0x21` reject response at Phase 3 (vs. `0x11` accept) leaks whether authentication succeeded or failed. This is a very weak oracle — it tells you only that the entire 24-byte ciphertext + (implicit) MAC check failed, not which byte failed. It is unlikely to enable a padding-oracle-style attack because the trailing byte is not a padding indicator (it is an unidentified checksum byte). Listed for completeness; impact is low.
 
-- The encrypted portion is much smaller than the total communication (24 bytes out of 255)
-- A significant portion of the exchange is plaintext or easily predictable
-- The challenge-response uses SHA-1, which has known weaknesses (though the application here is HMAC-like, not collision-resistance)
-- The initial report of nonce-to-MAC correlations was a statistical artifact that does not survive multiple-testing correction
+---
 
-The DS28EC20 datasheet found in the earlier research files describes a chip with exactly the capabilities we observe: 1-Wire interface, SHA-1 authentication engine, and EEPROM storage for secrets and configuration. This is almost certainly the chip family used in the lock or key, or a close relative of it.
+## 8. What Would Strengthen This Analysis
 
-## 9. What Would Strengthen This
+The analysis has several limits because of sample size and equipment. Here is what additional data or capability would unlock:
 
-The analysis has some limits because of the sample size. Here is what additional data would unlock:
-
-| Additional data | What it would tell us |
-|----------------|----------------------|
-| 50+ captures with same key | Although Bonferroni correction resolved the correlation artifact at n=6, more data would further validate hash independence and enable deeper statistical analysis |
+| Additional data / capability | What it would tell us |
+|------------------------------|----------------------|
+| 50+ captures with same key | Stronger statistical power; could detect nonce-MAC correlations down to \|r\| ≈ 0.3 |
+| Chosen-nonce injection into lock | True Strict Avalanche Criterion (SAC) testing; distinguish AES-CTR from CBC-zero-pad |
+| Chosen-plaintext captures | Definitive AES mode determination (block independence test) |
 | Captures at known time intervals | Determine if byte 29 is a clock counter or access counter |
 | Captures from a key that was revoked | See if the protocol changes after access revocation |
 | Power trace during MAC computation | Side-channel analysis (DPA) could extract the secret key |
 | Captures from different CLIQ system (different V-number) | Determine which parts of the protocol are system-specific |
-| Chosen-nonce injection into lock | Required for true Strict Avalanche Criterion (SAC) testing — not possible with passive captures |
+| Decapped DS28EC20 chip | Read out the secret directly (different attacker class — out of scope) |
 
-## 10. Summary
+---
+
+## 9. Limitations
+
+This analysis is bounded by the following limitations. Findings should be interpreted in light of them:
+
+1. **Small paired sample size.** Only 6–7 captures have a fully decodable (nonce, MAC) pair. Statistical tests on these captures are severely underpowered (see [§5.2](#52-nonce-to-mac-correlation-analysis)). Strong claims about hash input-output independence require a larger sample.
+
+2. **Passive captures only.** No chosen-plaintext, no chosen-nonce. AES mode cannot be definitively determined (see [§4.2](#42-evidence-for-aes-128-on-the-encrypted-payload-mode-undetermined)). True SAC testing is impossible.
+
+3. **Single system.** All 23 captures come from a single CLIQ installation (system ID `V1004XXX`). Generalization to other CLIQ deployments is plausible (the DS28EC20 hypothesis is chip-level, not system-level) but unverified.
+
+4. **No side-channel capability.** DPA, CPA, EMI, and glitching attacks are out of scope for this analysis. The DS28EC20 family has published side-channel vulnerabilities in the academic literature; this analysis does not assess them.
+
+5. **Trailing checksum byte unidentified.** The brute-force search over 2¹⁷ CRC-8 variants returned zero matches. The trailing byte is some form of per-packet checksum, but its specific algorithm is unknown. This is a quality gap, not a security gap — the trailing byte provides error detection at most.
+
+6. **Reliance on prior research data.** The 2014 captures come from University of Rostock IuK. While their work has been re-verified where possible (hard-coded NONCES / MACS / ENCRYPTED_PAYLOADS tables in `scripts/advanced_critique_analysis.py` match the raw `foo2-packets.txt`, `key1.txt`, `key2.txt` byte-for-byte), the original capture methodology and any preprocessing steps are not under this author's control.
+
+7. **No vendor confirmation.** ASSA ABLOY has not (yet) confirmed or denied the algorithm identifications in this analysis. The SHA-1 + AES-128 identification rests on indirect evidence (statistical properties + DS28EC20 command structure match), not on vendor documentation.
+
+8. **Post-quantum readiness is not assessed.** This is a physical-locking-system threat model; quantum cryptanalysis is not relevant. AES-128's effective security under Grover (~64 bits) is adequate for this product class through the 2030+ horizon.
+
+---
+
+## 10. Corrected Claims from v1
+
+This is a v2 document. The following claims from the earlier version of this analysis have been corrected:
+
+### 10.1 "0x33 Compute SHA command found in protocol" — **RETRACTED**
+
+**v1 claim:** The presence of the `0x33` "Compute SHA" command in the protocol is evidence for SHA-1.
+
+**v2 finding:** False. The byte `0x33` appears exactly once in the 1,434 bytes of raw hex dump from `data/previous_research/`, and not in a command position. The four commands actually used in the protocol are `0x01` (identity), `0x08` (read memory), `0x0A` (auth data), and `0x80` (compute MAC).
+
+**Root cause:** Duplicate-key bug in `scripts/analyze_captures.py:125-143` — the `known_commands` Python dict had `'33'` as a key twice (once mapped to "Read ROM", once to "Compute SHA"). Python silently kept only the last value. Any `0x33` byte appearing as data was then misreported as a "Compute SHA" command.
+
+**Fix applied:** The duplicate-key bug is documented; the SHA-1 identification now rests on the other two lines of evidence (20+2 byte MAC structure matching DS28EC20 spec; textbook statistical properties). The SHA-1 conclusion is unchanged; only the false supporting claim is removed.
+
+### 10.2 "CRC-8/MAXIM confirmed" — **RETRACTED**
+
+**v1 claim:** The protocol uses CRC-8/MAXIM for data integrity on the bus.
+
+**v2 finding:** False. A brute-force search over the entire 2¹⁷ CRC-8 parameter space (polynomial × initial value × final XOR × reflect-input × reflect-output) was performed against 7 known (Phase-3 payload, trailing byte) pairs and 7 known (Phase-2 nonce packet, trailing byte) pairs. **Zero CRC-8 variants match any plausible input combination.** The `patterns.php` extra-zero-pass variant was also tested and does not match. Simple XOR, sum-8, and two's-complement-sum-8 checksums were also tested and do not match.
+
+**Status:** The trailing byte is unidentified. The protocol uses some form of per-packet checksum, but the specific algorithm is unknown. This is documented honestly in [§4.3](#43-trailing-checksum-byte).
+
+### 10.3 "AES-128-CTR most likely" — **SOFTENED**
+
+**v1 claim:** The mode is most likely AES-128-CTR.
+
+**v2 finding:** AES-128-CTR is consistent with the observations, but so are AES-CBC with zero-padding, AES-CBC-CTS (NIST SP 800-38A), and single-block AES-CBC plus unencrypted metadata. Standard CBC+PKCS#7 is ruled out. Distinguishing the remaining candidates requires chosen-plaintext captures or side-channel analysis.
+
+**Status:** Softened to "AES-128 in some stream-compatible mode" in [§4.2](#42-evidence-for-aes-128-on-the-encrypted-payload-mode-undetermined).
+
+### 10.4 "Avalanche effect" terminology — **CORRECTED**
+
+**v1 claim:** The analysis measures the "avalanche effect" / Strict Avalanche Criterion (SAC).
+
+**v2 finding:** True SAC requires chosen-input pairs differing in exactly 1 bit, which is impossible with passive captures. The correct term for what we measure is **pairwise output independence** — whether random inputs produce ~50% bit differences in outputs.
+
+**Status:** Renamed throughout to "pairwise output independence"; the SAC caveat is documented in [§5.1](#51-pairwise-output-independence-analysis).
+
+### 10.5 "Nonce-to-MAC correlations are a statistical artifact" — **SOFTENED**
+
+**v1 claim:** The apparent nonce-to-MAC correlations are a statistical artifact of multiple hypothesis testing.
+
+**v2 finding:** The conclusion (no correlations survive Bonferroni correction) is correct, but the framing is too strong. At n = 6 with Bonferroni α = 0.000284, the test is severely underpowered — minimum detectable |r| at 80% power is 0.989. The correct framing is "insufficient evidence to claim correlation," not "no correlation exists."
+
+**Status:** Reframed in [§5.2](#52-nonce-to-mac-correlation-analysis) with explicit power analysis.
+
+### 10.6 Chi-squared on overlapping pairs — **CORRECTED**
+
+**v1 claim:** Chi-squared test on bytes of all C(n, 2) overlapping pairwise XOR differentials shows the MAC section is non-random.
+
+**v2 finding:** The chi-squared test assumes IID samples; overlapping pairs share captures and are not independent. With disjoint pairs (n/2 pairs instead of C(n, 2)), the chi-squared value drops and the conclusion flips. Moreover, even with disjoint pairs, the expected count per byte category is 0.26 (well below the rule-of-thumb minimum of 5), so the test is unreliable at this sample size.
+
+**Status:** Corrected in [§5.3](#53-xor-differential-analysis-with-disjoint-pairs). The informal observation about static framing bytes is retained but is no longer attributed to the chi-squared test.
+
+---
+
+## 11. Related Work
+
+The cryptanalysis of 1-Wire secure-authentication chips and similar challenge-response locking systems is an established research area. The following lines of related work are directly relevant:
+
+- **DS28EC20 and the Maxim/Dallas 1-Wire SHA-1 family.** The DS28EC20 is part of a longer line of 1-Wire EEPROM chips with built-in SHA-1 authentication (DS28E01-100, DS2432, DS28E04-100, DS28EC20). Maxim's own application notes (AN114, AN1427, AN5112) describe the SHA-1 authentication flow and MAC computation. Researchers should consult these for the exact message layout used by the `Compute MAC` command.
+
+- **iButton cloning.** Multiple academic and hobbyist works have demonstrated cloning attacks against earlier iButton and DS199x devices. These typically exploit weak secret lengths (32 bits) or read-out via decapping. The relevance to CLIQ depends on which DS28EC20 revision is deployed.
+
+- **Relay / forwarding attacks on contactless and contact-based authentication.** The relay-attack feasibility identified in [§7.2](#72-no-distance-bounding-relay-attack-feasible) is the same attack class as documented against:
+  - Passive Keyless Entry and Start (PKES) systems in automotive contexts (Francillon et al., USENIX Security 2011; Hancke & Kuhn, 2005).
+  - Contactless smartcards (ISO/IEC 14443).
+  - Earlier mechanical/electronic lock hybrids.
+  
+  The defensive countermeasure — distance bounding — was introduced by Brands and Chaum (1993) and refined by Hancke and Kuhn (2005). The CLIQ protocol does not implement distance bounding.
+
+- **SHA-1 in HMAC/MAC mode.** SHA-1 is deprecated for collision resistance (NIST disallowed SHA-1 for signatures after 2013; SHAttered published by Stevens et al. in 2017). However, SHA-1's use as a MAC (HMAC-SHA1 or in a challenge-response MAC like DS28EC20's) is still considered acceptable per NIST SP 800-107 because HMAC security does not depend on collision resistance. The CLIQ use case is closer to HMAC than to collision-resistance.
+
+- **AES mode security.** Standard CBC+PKCS#7 has known padding-oracle risks (Vaudenay 2002; later extended by many others). The fact that CLIQ does *not* use CBC+PKCS#7 (it uses a stream-compatible mode) avoids this class of attack. CTR mode has its own well-known pitfalls — nonce reuse catastrophic, no integrity without a separate MAC — but the CLIQ protocol's separate Phase-4 SHA-1 MAC mitigates the integrity gap.
+
+- **ASSA ABLOY CLIQ prior research.** The University of Rostock IuK work (2014) provided the initial signal-capture setup, protocol decoding, and the CRC-8 variant identification in `data/previous_research/patterns.php`. Their work is the foundation on which this cryptanalysis builds. The companion repo **[1wire-decoder-analysis](https://github.com/towhidulahmed/1wire-decoder-analysis)** documents the signal-decoding and relay-attack-feasibility analysis separately.
+
+Researchers extending this work should also consult the ASSA ABLOY product documentation for VERSO CLIQ, which states "128-bit AES encryption" as the cipher. The analysis in this repo is consistent with that claim (with the mode-determination caveats above).
+
+---
+
+## 12. Summary
 
 The ASSA ABLOY VERSO CLIQ system uses a two-layer security approach over a 1-Wire bus:
 
-1. **SHA-1 challenge-response** for mutual authentication (confirmed by command structure, 20-byte hash output + 2-byte device status matching DS28EC20 spec, and textbook-perfect statistical properties including per-bit flip probability of 0.5004)
-2. **AES-128-CTR** (counter mode, most likely) for a 24-byte encrypted payload containing access rights or configuration data — CBC ruled out by non-block-aligned ciphertext structure
+1. **SHA-1 challenge-response MAC** for authentication (high confidence: 20-byte hash + 2-byte device status matching DS28EC20 spec; textbook statistical properties including per-bit flip probability of 0.5004 and mean Hamming distance of 50.04%).
+2. **AES-128** in some stream-compatible mode (medium confidence: ASSA ABLOY claims AES-128; 24-byte ciphertext + 8-byte plaintext zeros rules out standard CBC+PKCS#7; CTR, CBC-zero-pad, CBC-CTS, or single-block CBC all consistent. Cannot be distinguished without chosen-plaintext captures).
+3. **Unidentified trailing checksum byte** (low confidence: brute-force over 2¹⁷ CRC-8 variants + simple checksums returned zero matches; not CRC-8/MAXIM as previously claimed).
 
-The implementation generally works as intended, with proper nonce generation and excellent pairwise output independence (0.5004 bit-flip probability). The initially reported nonce-to-MAC correlations were resolved as a statistical artifact of multiple hypothesis testing — zero correlations survive Bonferroni correction across the 176 tested byte pairs.
+The implementation generally works as intended, with proper nonce generation and excellent pairwise output independence (per-bit flip probability 0.5004 over 6 paired sessions). The earlier claim of nonce-to-MAC linear correlations was correctly identified as not surviving Bonferroni correction, but the test was also severely underpowered at n = 6 (minimum detectable |r| at 80% power = 0.989). The correct framing is "insufficient evidence to claim correlation," not "no correlations exist."
 
-Remaining areas of concern: the system ID is exposed in plaintext every session, key identifiers are transmitted in the clear, and the protocol has not changed in 10 years. The most actionable research directions would be side-channel analysis (DPA) during MAC computation and relay attack feasibility testing, as the protocol lacks distance bounding.
+**Highest-impact weakness under the threat model in this document: the lack of distance bounding, which makes the protocol vulnerable to a pure relay attack.** This does not require breaking any cryptography. The 7.6 ms round-trip is well within the latency budget of a fast radio relay link.
+
+Other areas of concern: the system ID is exposed in plaintext every session (tracking vulnerability), key identifiers are transmitted in the clear (privacy), and the protocol has not changed in 10 years (long exposure window for any vulnerability found). The most actionable research directions are: (1) building and demonstrating a relay-attack proof-of-concept with explicit timing measurements, (2) DPA during MAC computation, (3) chosen-plaintext captures to definitively determine the AES mode, and (4) the trailing-byte checksum identification.
 
 ---
 
@@ -444,36 +786,46 @@ Remaining areas of concern: the system ID is exposed in plaintext every session,
 ```
 ├── data/
 │   ├── captures/
-│   │   ├── user1_key/           # 8 sessions
-│   │   ├── user2_key/           # 2 sessions
-│   │   └── extas_comparison/    # 5 sessions
+│   │   ├── user1_key/           # 8 sessions (2024, Saleae)
+│   │   ├── user2_key/           # 2 sessions (2024, different key)
+│   │   └── extas_comparison/    # 5 sessions (2024, comparison captures)
 │   └── previous_research/       # Uni Rostock decoded packets (~2014)
+│       ├── foo2-packets.txt     # 6 decoded unlock sessions (hex + ASCII)
+│       ├── key1.txt             # Decoded session from a second key
+│       ├── key2.txt             # Another session from that second key
+│       ├── patterns.php         # Uni Rostock protocol decoder (CRC-8 variant)
+│       ├── dump.c               # C program for extracting transitions from ADC captures
+│       └── ATTRIBUTION.md
 ├── scripts/
 │   ├── decode_signal.py                # Core 1-Wire signal decoder
 │   ├── analyze_captures.py             # Basic signal analysis
-│   ├── differential_cryptanalysis.py   # Differential cryptanalysis suite
+│   ├── differential_cryptanalysis.py   # v1 differential cryptanalysis suite
 │   ├── extended_analysis.py            # Multi-source analysis (all 23 sessions)
-│   └── advanced_critique_analysis.py   # Bonferroni correction, CRC-16 tests, SAC analysis, AES mode determination
-└── README.md
+│   ├── advanced_critique_analysis.py   # v1 Bonferroni / CRC-16 / SAC / AES-CTR analysis
+│   ├── crc_bruteforce_v2.py            # v2 CRC-8 brute-force variant search (NEW)
+│   └── v2_statistics.py                # v2 exact p-values, power analysis, disjoint-pair chi² (NEW)
+├── (diagrams are inline ASCII art in README.md — no external image files)
+├── critique_analysis_results.json      # v1 critique summary (kept for historical reference)
+└── README.md                           # This document
 ```
 
 ## Running the Analysis
 
-Python 3, no external dependencies.
+Python 3, no external dependencies for the v1 scripts. The v2 statistical analysis scripts also use only the standard library.
 
 ```bash
-# Basic signal decode and cross-file comparison
+# v1 analyses (kept for historical reference; see §10 for known issues)
 python3 scripts/analyze_captures.py
-
-# Full differential cryptanalysis (Hamming, avalanche, XOR, chi-squared, correlations)
 python3 scripts/differential_cryptanalysis.py
-
-# Extended analysis combining all 23 sessions from all sources
 python3 scripts/extended_analysis.py
-
-# Advanced critique resolution (Bonferroni, CRC-16, SAC, AES-CTR analysis)
 python3 scripts/advanced_critique_analysis.py
+
+# v2 corrected analyses (NEW in this version)
+python3 scripts/crc_bruteforce_v2.py        # Brute-force search for the trailing-byte algorithm
+python3 scripts/v2_statistics.py            # Exact p-values, power analysis, disjoint-pair chi-squared
 ```
+
+The v2 scripts write their outputs to `v2_statistics.json` and `crc_bruteforce_results.json` in the repo root. The v1 scripts write to `crypto_analysis_results.json` and `critique_analysis_results.json`.
 
 ## Acknowledgments
 
@@ -482,6 +834,28 @@ python3 scripts/advanced_critique_analysis.py
 
 **Initial signal analysis and protocol decoding:** [1wire-decoder-analysis](https://github.com/towhidulahmed/1wire-decoder-analysis)
 
-## Disclaimer
+**Statistical methods.** The Bonferroni correction, Benjamini-Hochberg FDR, and Monte-Carlo validation in the v1 analysis are standard; the v2 analysis additionally uses exact Student's t p-values via the regularized incomplete beta function (Numerical Recipes §6.4) and explicit power analysis via the Fisher z-transformation.
 
-This research is conducted for academic purposes only. It is not intended to enable unauthorized access to any locking system.
+## License
+
+Code in `scripts/`: **MIT License** (see [`LICENSE`](LICENSE) — to be added by the maintainer).
+
+Analysis text in this README and in `data/previous_research/`: **CC-BY-4.0** for the analysis text. The `data/previous_research/` files are reproduced with permission from the University of Rostock IuK; redistribution restrictions may apply — contact the IuK chair before re-publishing.
+
+The capture data under `data/captures/` is the author's own work and is released under **CC0 1.0** (public domain dedication), subject to the responsible-disclosure caveats in [§Responsible Disclosure](#responsible-disclosure).
+
+## References
+
+1. Maxim Integrated / Analog Devices, *DS28EC20 DeepCover Secure Authenticator with 1-Wire SHA-1 Master and 20kb EEPROM*, datasheet.
+2. Maxim Integrated, Application Note 114: *Getting Started with Secure 1-Wire SHA-1 Authentication*.
+3. Stevens, M., Bursztein, E., Karpman, P., Albertini, A., Markov, Y. *The first collision for full SHA-1.* CRYPTO 2017.
+4. Brands, S., Chaum, D. *Distance-Bounding Protocols.* EUROCRYPT 1993.
+5. Hancke, G. P., Kuhn, M. G. *An RFID Distance Bounding Protocol.* SECURECOMM 2005.
+6. Francillon, A., Danev, B., Čapkun, S. *Relay Attacks on Passive Keyless Entry and Start Systems in Modern Cars.* USENIX Security 2011.
+7. NIST SP 800-38A: *Recommendation for Block Cipher Modes of Operation.* (For CBC-CTS, CTR, CBC modes.)
+8. NIST SP 800-107: *Recommendation for Applications Using Approved Hash Algorithms.* (For HMAC-SHA1 security.)
+9. Vaudenay, S. *Security Flaws Induced by CBC Padding — Applications to SSL, IPSEC, WTLS...* EUROCRYPT 2002.
+
+---
+
+*Maintained by Md Towhidul Ahmed. Pull requests that extend the analysis (especially: chosen-plaintext captures, side-channel work, or a definitive identification of the trailing checksum byte) are welcome. Pull requests that publish working key-recovery or unlock-emulation code will not be merged without documented vendor coordination.*

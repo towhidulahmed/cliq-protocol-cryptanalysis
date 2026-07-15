@@ -24,3 +24,5 @@ Logic Analyser/
 
 # Generated output
 crypto_analysis_results.json
+v2_statistics.json
+crc_bruteforce_results.json
