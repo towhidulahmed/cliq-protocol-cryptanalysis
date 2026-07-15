@@ -1,24 +1,20 @@
 # Previous Research Attribution
 
-The files in this directory were originally produced at the **University of Rostock**:
+The 2014 protocol-level research data referenced in this repository was originally produced at the **University of Rostock**:
 
 - **Faculty:** Fakultät für Informatik und Elektrotechnik (Faculty of Computer Science and Electrical Engineering)
 - **Department:** Lehrstuhl für Informations- und Kommunikationsdienste (Chair of Information and Communication Services, IuK)
 - **Website:** https://www.iuk.informatik.uni-rostock.de/
 - **University:** https://www.uni-rostock.de/
 
-## Files
+## Data Availability
 
-| File | Description |
-|------|-------------|
-| `decoded_unlock_sessions.txt` | 6 decoded unlock sessions showing full hex + ASCII packet data |
-| `session_key_a.txt` | Decoded session from a second key (including raw bit-level data) |
-| `session_key_b.txt` | Another decoded session from that second key |
-| `protocol_decoder.php` | Protocol decoder with pulse-width pattern matching and CRC-8 |
-| `signal_extractor.c` | C program for extracting signal transitions from raw ADC captures |
+The raw 2014 research data (decoded packet dumps, protocol decoder source code, and signal extraction tools) is **not included** in this repository, as it is not the author's work. Researchers who need access to the original 2014 data should contact the University of Rostock IuK department directly.
+
+The cryptographic values (nonces, MACs, encrypted payloads) used in the statistical analysis are hardcoded in `scripts/advanced_critique_analysis.py` for reproducibility. These were extracted from the 2014 captures during the author's analysis work.
 
 ## Context
 
-This research was conducted as part of an investigation into the ASSA ABLOY VERSO CLIQ locking system. The researchers at Uni Rostock developed the initial signal capture setup (ADC + USB-FIFO + Arduino), decoded the 1-Wire communication, and identified the basic protocol structure.
+The 2014 Uni Rostock IuK research was used as a reference study during the author's masters research at the University of Rostock in 2024. The researchers at Uni Rostock developed the initial signal capture setup (ADC + USB-FIFO + Arduino), decoded the 1-Wire communication, and identified the basic protocol structure.
 
-Their work established the foundation on which the current cryptographic analysis builds.
+The 2024 captures included in `data/captures/` are the author's own work.

@@ -591,6 +591,8 @@ def main():
             all_sessions.append(session)
             all_labels.append(f"prev_pkt{i+1}")
             print(f"  Loaded prev_pkt{i+1}: {len(session)} bytes")
+    else:
+        print(f"  [skipped] 2014 raw data not included. Contact Uni Rostock IuK for access.")
     
     # Load from session_key_a.txt, session_key_b.txt (different key from earlier research)
     for kf in ['session_key_a.txt', 'session_key_b.txt']:

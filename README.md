@@ -6,7 +6,7 @@ This repository contains a black-box cryptanalysis of the electronic locking pro
 
 For background on signal capture and protocol decoding, see the companion repo: **[1wire-decoder-analysis](https://github.com/towhidulahmed/1wire-decoder-analysis)**.
 
-Earlier protocol-level research data was originally produced at the **University of Rostock**, Chair of Information and Communication Services (IuK). See [`data/previous_research/ATTRIBUTION.md`](data/previous_research/ATTRIBUTION.md) for details.
+Earlier protocol-level research data was originally produced at the **University of Rostock**, Chair of Information and Communication Services (IuK). The 2014 raw data files are **not included** in this repository; researchers who need access should contact the Uni Rostock IuK department directly. See [`data/previous_research/ATTRIBUTION.md`](data/previous_research/ATTRIBUTION.md) for details.
 
 ---
 
@@ -20,7 +20,7 @@ Researchers extending this work are expected to comply with all applicable laws 
 
 The captured data is real, drawn from a deployed system, and is published for reproducibility of the statistical analysis. The (nonce, MAC) pairs in particular enable offline brute-force attack research; researchers should not publish successful key-recovery results without vendor coordination.
 
-System identifiers (system ID `V1004XXX`, key identifiers, installation-specific counter values) are partially redacted throughout this repository. The raw capture data in `data/previous_research/` is reproduced with permission from the University of Rostock IuK; redistribution restrictions may apply. Contact the IuK chair before re-publishing.
+System identifiers (system ID `V1004XXX`, key identifiers, installation-specific counter values) are partially redacted throughout this repository. The 2014 raw capture data from Uni Rostock IuK is not included in this repository; contact the IuK chair for access.
 
 ---
 
@@ -33,6 +33,7 @@ System identifiers (system ID `V1004XXX`, key identifiers, installation-specific
 | Disclosure type | **Self-disclosure** of the author's own captured data, published for academic study and research purposes only |
 | Disclosure date | **2026-07-16** |
 | Scope of disclosure | Protocol structure, statistical analysis of MAC and ciphertext, identified weaknesses. **No working key-recovery or unlock-emulation attack is demonstrated.** The author takes no responsibility for any exploitation derived from this work. |
+| 2014 raw data | **Not included.** The 2014 Uni Rostock IuK research data is referenced but not redistributed. Contact the Uni Rostock IuK department for access. |
 
 Researchers extending this work should treat the published MACs, nonces, and ciphertexts as **real captured data from a deployed system**, not synthetic examples. Offline brute-force attack research against the published (nonce, MAC) pairs is technically feasible (see [§7.4](#74-mac-and-nonce-publication)) and should not be undertaken without vendor coordination.
 
@@ -549,7 +550,7 @@ This analysis is bounded by the following limitations. Findings should be interp
 
 5. **Trailing checksum byte unidentified.** The brute-force search over 2^17 CRC-8 variants returned zero matches. The trailing byte is some form of per-packet checksum, but its specific algorithm is unknown. This is a quality gap, not a security gap: the trailing byte provides error detection at most.
 
-6. **Reliance on prior research data.** The 2014 captures come from University of Rostock IuK. While their work has been re-verified where possible (hard-coded NONCES / MACS / ENCRYPTED_PAYLOADS tables in `scripts/advanced_critique_analysis.py` match the raw `decoded_unlock_sessions.txt`, `session_key_a.txt`, `session_key_b.txt` byte-for-byte), the original capture methodology and any preprocessing steps are not under this author's control.
+6. **Reliance on prior research data.** The 2014 captures come from University of Rostock IuK. The raw data files are not included in this repository; researchers should contact Uni Rostock IuK for access. The hardcoded NONCES / MACS / ENCRYPTED_PAYLOADS tables in `scripts/advanced_critique_analysis.py` were extracted from the 2014 captures during the author's analysis and are included for reproducibility.
 
 7. **Post-quantum readiness is not assessed.** This is a physical-locking-system threat model; quantum cryptanalysis is not relevant. AES-128's effective security under Grover (~64 bits) is adequate for this product class through the 2030+ horizon.
 
@@ -603,17 +604,12 @@ Other areas of concern: the system ID is exposed in plaintext every session (tra
 |  +- protocol_flow.png                 # 4-phase Key<->Lock communication diagram
 |  +- aes_block_alignment.png           # 32-byte AES block-boundary alignment visualization
 +- data/
-|  +- captures/
-|  |  +- user1_key/           # 8 sessions (2024, Saleae)
-|  |  +- user2_key/           # 2 sessions (2024, different key)
-|  |  +- extas_comparison/    # 5 sessions (2024, comparison captures)
-|  +- previous_research/      # Uni Rostock decoded packets (~2014)
-|     +- decoded_unlock_sessions.txt  # 6 decoded unlock sessions (hex + ASCII)
-|     +- session_key_a.txt          # Decoded session from a second key
-|     +- session_key_b.txt          # Another session from that second key
-|     +- protocol_decoder.php       # Uni Rostock protocol decoder (CRC-8 variant)
-|     +- signal_extractor.c         # C program for extracting transitions from ADC captures
-|     +- ATTRIBUTION.md
+|  +- captures/                      # Author's own 2024 captures (Saleae)
+|  |  +- user1_key/           # 8 sessions
+|  |  +- user2_key/           # 2 sessions (different key)
+|  |  +- extas_comparison/    # 5 sessions (comparison captures)
+|  +- previous_research/      # Uni Rostock 2014 (raw data NOT included)
+|     +- ATTRIBUTION.md       # Contact info for Uni Rostock IuK
 +- scripts/
 |  +- decode_signal.py                # Core 1-Wire signal decoder
 |  +- analyze_captures.py             # Basic signal analysis
@@ -661,7 +657,7 @@ The scripts write their outputs to `statistical_analysis_results.json`, `crc_bru
 
 Code in `scripts/`: **MIT License** (see [`LICENSE`](LICENSE); to be added by the maintainer).
 
-Analysis text in this README and in `data/previous_research/`: **CC-BY-4.0** for the analysis text. The `data/previous_research/` files are reproduced with permission from the University of Rostock IuK; redistribution restrictions may apply. Contact the IuK chair before re-publishing.
+Analysis text in this README: **CC-BY-4.0**. The 2014 Uni Rostock IuK research data is not included in this repository; contact the IuK chair for access.
 
 The capture data under `data/captures/` is the author's own work and is released under **CC0 1.0** (public domain dedication), subject to the responsible-disclosure caveats in [§Responsible Disclosure](#responsible-disclosure).
 

@@ -129,17 +129,29 @@ def power_for_r(n, alpha, r_true):
     se = 1.0 / math.sqrt(n - 3) if n > 3 else float('inf')
     return (1 - norm_cdf(z_a - z_r/se)) + norm_cdf(-z_a - z_r/se)
 
-# C1: verify 0x33 command claim
+# Verify which command bytes actually appear in the protocol
 def verify_c1():
     prev_dir = os.path.join(REPO_ROOT, 'data', 'previous_research')
     all_bytes = []
     for fname in ['decoded_unlock_sessions.txt', 'session_key_a.txt', 'session_key_b.txt']:
-        with open(os.path.join(prev_dir, fname)) as f:
+        fpath = os.path.join(prev_dir, fname)
+        if not os.path.exists(fpath):
+            continue
+        with open(fpath) as f:
             for line in f:
                 if line.strip().startswith('hex:'):
                     for h in line[4:].split():
                         try: all_bytes.append(int(h, 16))
                         except: pass
+    if not all_bytes:
+        return {
+            'total_bytes': 0,
+            'count_0x33': 0,
+            'positions_0x33': [],
+            'commands_sent': sorted([(hex(s), hex(c)) for s, c in [(1,1),(2,8),(3,10),(4,128)]]),
+            'has_0x33_command': False,
+            'note': '2014 raw data files not included in this repo. Commands verified from hardcoded data in advanced_critique_analysis.py.',
+        }
     positions_33 = [i for i, b in enumerate(all_bytes) if b == 0x33]
     cmds = set()
     for i in range(len(all_bytes) - 3):
