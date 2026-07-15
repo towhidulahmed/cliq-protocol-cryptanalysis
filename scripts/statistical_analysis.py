@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-v2 Statistical analyses: H1 disjoint-pair chi-squared, H3 exact p-values,
-H4 power analysis, H2 AES mode reasoning. Also verifies C1 (0x33 command).
+Statistical analyses for the CLIQ protocol cryptanalysis:
+  - Disjoint-pair chi-squared test on MAC XOR differentials
+  - Exact Student's t p-values for nonce-to-MAC correlations (via regularized
+    incomplete beta function)
+  - Explicit power analysis (Fisher z-transformation)
+  - Verification of which command bytes actually appear in the protocol
+Output: statistical_analysis_results.json in the repo root.
 """
 import os, sys, math, json
 from collections import Counter
@@ -148,22 +153,22 @@ def verify_c1():
 
 def main():
     print("╔" + "═" * 76 + "╗")
-    print("║  v2 STATISTICAL ANALYSES                                                 ║")
+    print("║  STATISTICAL ANALYSIS                                                    ║")
     print("╚" + "═" * 76 + "╝")
 
     results = {}
 
-    # ---- C1 ----
-    print("\n=== C1: 0x33 command claim ===")
+    # ---- Command byte verification ----
+    print("\n=== Command byte verification (0x33 claim) ===")
     c1 = verify_c1()
     print(f"  0x33 occurrences in raw stream: {c1['count_0x33']}")
     print(f"  Positions: {c1['positions_0x33']}")
     print(f"  Commands actually sent: {c1['commands_sent']}")
     print(f"  Is 0x33 ever a command? {c1['has_0x33_command']}")
-    results['c1'] = c1
+    results['command_verification'] = c1
 
-    # ---- H1 ----
-    print("\n=== H1: chi-squared with disjoint vs overlapping pairs ===")
+    # ---- Chi-squared with disjoint vs overlapping pairs ----
+    print("\n=== Chi-squared: disjoint vs overlapping pairs ===")
     keys = sorted(MACS.keys()); macs = [MACS[k] for k in keys]; n = len(macs)
     h1 = {}
     for name, (s, e) in {'MAC[0:20]': (0, 20), 'MAC[20:22]': (20, 22), 'MAC[0:22]': (0, 22)}.items():
@@ -178,16 +183,16 @@ def main():
             'disjoint_reliable': reliable,
         }
         print(f"  {name}:")
-        print(f"    Overlap (v1): n={len(overlap)}, chi²={chi_o:.1f}")
-        print(f"    Disjoint (v2): n={len(disjoint)}, chi²={chi_d:.1f} ({'reliable' if reliable else 'UNRELIABLE — expected count < 5'})")
-    results['h1'] = h1
+        print(f"    Overlapping pairs: n={len(overlap)}, chi2={chi_o:.1f}")
+        print(f"    Disjoint pairs:    n={len(disjoint)}, chi2={chi_d:.1f} ({'reliable' if reliable else 'UNRELIABLE: expected count < 5'})")
+    results['chi_squared'] = h1
 
-    # ---- H3: exact p-values ----
-    print("\n=== H3: exact p-values (replaces v1 lookup table) ===")
+    # ---- Exact p-values for nonce-to-MAC correlations ----
+    print("\n=== Exact p-values for nonce-to-MAC correlations ===")
     paired = sorted([k for k in NONCES if k in MACS])
     n_paired = len(paired); df = n_paired - 2
     n_tests = 8 * 22; alpha_bonf = 0.05 / n_tests
-    print(f"  n={n_paired}, df={df}, Bonferroni α={alpha_bonf:.6f}")
+    print(f"  n={n_paired}, df={df}, Bonferroni alpha={alpha_bonf:.6f}")
     corrs = []
     for ni in range(8):
         nv = [float(NONCES[k][ni]) for k in paired]
@@ -209,22 +214,22 @@ def main():
     n_bonf = sum(1 for c in corrs if c['p_bonf'] < 0.05)
     print(f"\n  Uncorrected significant: {n_unc} (expected by chance: {0.05*n_tests:.1f})")
     print(f"  Bonferroni-significant: {n_bonf}")
-    results['h3'] = {
+    results['correlations'] = {
         'n_paired': n_paired, 'n_tests': n_tests, 'alpha_bonferroni': alpha_bonf,
         'uncorrected_significant': n_unc, 'expected_fp': 0.05 * n_tests,
         'bonferroni_significant': n_bonf,
         'top_5': corrs[:5],
     }
 
-    # ---- H4: power analysis ----
-    print("\n=== H4: power analysis at n=6 ===")
+    # ---- Power analysis ----
+    print("\n=== Power analysis at n=6 ===")
     for power in [0.50, 0.80, 0.90, 0.95]:
         r_min = min_detectable_r(n_paired, alpha_bonf, power)
         print(f"  At power={power:.2f}: minimum detectable |r| = {r_min:.4f}")
     print(f"\n  Power to detect |r|=0.9: {power_for_r(n_paired, alpha_bonf, 0.9):.3f}")
     print(f"  Power to detect |r|=0.7: {power_for_r(n_paired, alpha_bonf, 0.7):.3f}")
     print(f"  Power to detect |r|=0.5: {power_for_r(n_paired, alpha_bonf, 0.5):.3f}")
-    results['h4'] = {
+    results['power_analysis'] = {
         'n': n_paired, 'alpha_bonferroni': alpha_bonf,
         'min_detectable_r_at_80pct_power': min_detectable_r(n_paired, alpha_bonf, 0.80),
         'power_for_r_0.9': power_for_r(n_paired, alpha_bonf, 0.9),
@@ -232,20 +237,20 @@ def main():
         'power_for_r_0.5': power_for_r(n_paired, alpha_bonf, 0.5),
     }
 
-    # ---- H2: AES mode reasoning ----
-    print("\n=== H2: AES mode interpretations ===")
+    # ---- AES mode interpretations ----
+    print("\n=== AES mode interpretations ===")
     h2_modes = [
         ('AES-CTR', 'Consistent. 24B stream-encrypted, 8 zeros are plaintext framing.'),
         ('AES-CBC zero-pad', 'Consistent if receiver treats last 8B as plaintext zeros post-decrypt. Unverifiable passively.'),
-        ('AES-CBC-CTS', 'Consistent. NIST SP 800-38A. 24B → 24B ct, no padding expansion.'),
+        ('AES-CBC-CTS', 'Consistent. NIST SP 800-38A. 24B to 24B ct, no padding expansion.'),
         ('Single-block AES + 8B unencrypted metadata', 'Consistent. First 16B encrypted, next 8B static protocol field.'),
         ('AES-ECB', 'Cannot rule out at n=7. Detecting ECB needs ~2^32 captures.'),
     ]
     for mode, verdict in h2_modes:
-        print(f"  • {mode}: {verdict}")
-    results['h2'] = {'modes': h2_modes}
+        print(f"  - {mode}: {verdict}")
+    results['aes_modes'] = {'modes': h2_modes}
 
-    # ---- MAC/nonce verification (already verified previously) ----
+    # ---- Verified statistics ----
     print("\n=== Verified statistics ===")
     pairs = list(combinations(paired, 2))
     hds = [hamming_distance_bytes(MACS[k1], MACS[k2]) for k1, k2 in pairs]
@@ -271,9 +276,10 @@ def main():
 
     # Save
     os.makedirs('/home/z/my-project/download', exist_ok=True)
-    with open('/home/z/my-project/download/v2_statistics.json', 'w') as f:
+    out_path = '/home/z/my-project/download/statistical_analysis_results.json'
+    with open(out_path, 'w') as f:
         json.dump(results, f, indent=2, default=str)
-    print(f"\nSaved: /home/z/my-project/download/v2_statistics.json")
+    print(f"\nSaved: {out_path}")
 
 if __name__ == '__main__':
     main()

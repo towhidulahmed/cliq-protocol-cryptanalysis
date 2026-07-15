@@ -199,7 +199,7 @@ def analyze_avalanche_effect(captures: List[List[int]], challenge_range: Tuple[i
     }
 
 def analyze_xor_differentials(captures: List[List[int]], start: int, end: int) -> Dict:
-    """XOR differential analysis — look for patterns in XOR of capture pairs."""
+    """XOR differential analysis - look for patterns in XOR of capture pairs."""
     pairs = list(combinations(range(len(captures)), 2))
     xor_results = []
     
@@ -593,7 +593,7 @@ def main():
     elif 30 <= mean_pct <= 70:
         print(f"  △ ACCEPTABLE but not ideal (expected ~50%, got {mean_pct:.1f}%)")
     else:
-        print(f"  ✗ WEAK avalanche effect — possible weakness in hash/cipher")
+        print(f"  ✗ WEAK avalanche effect - possible weakness in hash/cipher")
     
     # ========================================================================
     # 4. XOR Differential Analysis
@@ -616,7 +616,7 @@ def main():
         print(f"    Zero bytes in XOR: {xor_analysis['zero_byte_pct']:.1f}% "
               f"(expected ~0.4% for random, higher = more static)")
         if xor_analysis['has_repeated_differentials']:
-            print(f"    ⚠ REPEATED XOR DIFFERENTIALS FOUND — possible weakness!")
+            print(f"    ⚠ REPEATED XOR DIFFERENTIALS FOUND - possible weakness!")
             for diff, count in xor_analysis['repeated_differentials'].items():
                 print(f"      '{diff[:50]}...' appears {count} times")
         else:
@@ -680,7 +680,7 @@ def main():
         print(f"    - Linear relationship leaking through the cipher")
         print(f"    - Or simply statistical noise with small sample size (n={len(captures)})")
     else:
-        print(f"  ✓ No significant correlations — consistent with strong crypto")
+        print(f"  ✓ No significant correlations - consistent with strong crypto")
     
     # ========================================================================
     # 7. Counter/Nonce Pattern Analysis
@@ -724,7 +724,7 @@ def main():
     # 9. Same Key vs Different Key Analysis
     # ========================================================================
     print(f"\n{'═' * 90}")
-    print("9. SAME KEY vs DIFFERENT KEY — DIFFERENTIAL ANALYSIS")
+    print("9. SAME KEY vs DIFFERENT KEY - DIFFERENTIAL ANALYSIS")
     print(f"{'═' * 90}")
     
     if len(user1_captures) >= 2 and len(user2_captures) >= 2:

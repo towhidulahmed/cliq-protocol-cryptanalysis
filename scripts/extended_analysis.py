@@ -79,7 +79,7 @@ def process_csv_file(file_path: str, reader_func) -> List[int]:
     return binary_to_bytes(binary_data)
 
 def parse_previous_work_packets(file_path: str) -> List[List[int]]:
-    """Parse the foo2-packets.txt format — extract complete unlock sessions."""
+    """Parse the foo2-packets.txt format - extract complete unlock sessions."""
     sessions = []
     current_session = []
     
@@ -309,7 +309,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
     """Compare sessions from different data sources."""
     
     print(f"\n{'═' * 90}")
-    print("CROSS-SOURCE ANALYSIS — Previous Work + Your Captures + Extas")
+    print("CROSS-SOURCE ANALYSIS - Previous Work + Your Captures + Extas")
     print(f"{'═' * 90}")
     
     # Group sessions by source
@@ -330,7 +330,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
     
     nonce_data = []
     for session, label in zip(all_sessions, all_labels):
-        # Search for pattern "00 02 11 08" — this is RSP #02 type 0x11 with 8-byte payload
+        # Search for pattern "00 02 11 08" - this is RSP #02 type 0x11 with 8-byte payload
         for i in range(len(session) - 12):
             if (session[i] == 0x00 and session[i+1] == 0x02 and 
                 session[i+2] == 0x11 and session[i+3] == 0x08):
@@ -412,7 +412,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
                 sources = [d['label'] for d in nonce_data if bytes_to_hex(d['nonce']) == nonce_hex]
                 print(f"    Nonce '{nonce_hex}' used in {count} sessions: {sources}")
         else:
-            print(f"\n  ✓ All {len(nonces)} nonces are unique — no reuse detected")
+            print(f"\n  ✓ All {len(nonces)} nonces are unique - no reuse detected")
         
         # Nonce entropy
         all_nonce_bytes = [b for n in nonces for b in n]
@@ -435,7 +435,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
             unique = len(set(values))
             ent = shannon_entropy(values)
             print(f"    Byte {pos}: {len(nonces)} samples, {unique} unique, "
-                  f"entropy={ent:.2f} — {[f'{v:02X}' for v in values]}")
+                  f"entropy={ent:.2f} - {[f'{v:02X}' for v in values]}")
     
     if len(mac_data) >= 2:
         print(f"\n{'═' * 90}")
@@ -533,7 +533,7 @@ def cross_source_comparison(all_sessions: List[List[int]], all_labels: List[str]
         zero_pct = zero_count / len(all_xor_bytes) * 100
         
         print(f"\n  Total XOR differential bytes analyzed: {len(all_xor_bytes)}")
-        print(f"  Zero bytes: {zero_count} ({zero_pct:.1f}%) — expected ~0.4% for random")
+        print(f"  Zero bytes: {zero_count} ({zero_pct:.1f}%) - expected ~0.4% for random")
         
         # Per-byte position analysis across all encrypted payloads
         print(f"\n  Per-byte encrypted payload variability:")

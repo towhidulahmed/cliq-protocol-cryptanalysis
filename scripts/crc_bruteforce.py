@@ -69,7 +69,7 @@ def algebraic_search(samples: List[Tuple[bytes, int]]) -> List[Dict]:
     raw_crcs = [None] * len(samples)  # will fill in per (poly, refin, refout)
     observed = [c for _, c in samples]
 
-    # Precompute zeros-transform table for each init (0..255) — depends on (poly, refin, refout)
+    # Precompute zeros-transform table for each init (0..255). Depends on (poly, refin, refout)
     for poly in range(1, 256):
         for refin in [False, True]:
             table = make_crc8_table(poly, refin)
@@ -185,7 +185,7 @@ def main():
         print("  - A non-CRC checksum (e.g., XOR, modular sum, custom polynomial)")
         print("  - A CRC with non-standard parameters (e.g., the patterns.php extra-zero-pass variant)")
         print("  - A truncated hash or sequence-derived value")
-        print("  The 'CRC-8/MAXIM confirmed' claim in v1 README is NOT supported by the data.")
+        print("  No standard CRC-8 variant (including CRC-8/MAXIM) matches any plausible input combination.")
 
 if __name__ == '__main__':
     main()

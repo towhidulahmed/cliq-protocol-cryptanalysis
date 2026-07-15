@@ -7,10 +7,10 @@ to conference-grade (CHES / USENIX Security / IACR) quality.
 
 Critique 1: Multiple Hypothesis Testing (Bonferroni correction) on Nonce-MAC correlations
 Critique 2: CRC-16 verification on MAC bytes [20] and [21]
-Critique 3: SAC vs Output Independence — proper terminology & quantification
+Critique 3: SAC vs Output Independence - proper terminology & quantification
 Critique 4: AES block mode alignment (24+8=32 byte boundary analysis)
 
-All analysis uses ONLY the raw captured data — no external dependencies.
+All analysis uses ONLY the raw captured data - no external dependencies.
 """
 
 import math
@@ -38,7 +38,7 @@ NONCES = {
 
 # 6 MACs from Phase 4 (authentication hash), 22 bytes each
 # Source: data/previous_research/foo2-packets.txt, key1.txt, key2.txt
-# Format: 82 00 04 80 15 [22 bytes MAC] — we extract the 22 bytes after "80 15"
+# Format: 82 00 04 80 15 [22 bytes MAC] - we extract the 22 bytes after "80 15"
 MACS = {
     'prev_pkt1': [0x85, 0x72, 0xD1, 0x57, 0xFE, 0xBA, 0x71, 0xF5,
                   0xE4, 0xCE, 0x01, 0x0D, 0x4E, 0xE7, 0x87, 0xD4,
@@ -458,7 +458,7 @@ def critique_1_multiple_hypothesis_testing():
   • Required |r| > {r_crit_bonf:.4f}  
   • Surviving correlations: {len(significant_bonferroni)}
   
-  VERDICT: {"The correlations are CONSISTENT WITH PURE CHANCE and the look-everywhere effect. No statistically significant nonce-to-MAC linearity exists after proper multiple testing correction." if len(significant_bonferroni) == 0 else "SIGNIFICANT correlations survive even Bonferroni correction — this suggests a REAL cryptographic weakness."}
+  VERDICT: {"The correlations are CONSISTENT WITH PURE CHANCE and the look-everywhere effect. No statistically significant nonce-to-MAC linearity exists after proper multiple testing correction." if len(significant_bonferroni) == 0 else "SIGNIFICANT correlations survive even Bonferroni correction - this suggests a REAL cryptographic weakness."}
   """)
     
     return correlations
@@ -597,7 +597,7 @@ def critique_2_crc16_verification():
     print(f"  MAC[20] unique values: {mac20_unique}/{len(mac20_values)} → "
           f"{'Full entropy (likely hash/CRC)' if mac20_unique == len(mac20_values) else 'Reduced entropy'}")
     print(f"  MAC[21] unique values: {mac21_unique}/{len(mac21_values)} → "
-          f"{'Full entropy (likely hash/CRC)' if mac21_unique == len(mac21_values) else 'Reduced entropy — possible metadata or CRC'}")
+          f"{'Full entropy (likely hash/CRC)' if mac21_unique == len(mac21_values) else 'Reduced entropy - possible metadata or CRC'}")
     
     # ---- CONCLUSION ----
     print(f"\n  {'═' * 85}")
@@ -625,7 +625,7 @@ def critique_2_crc16_verification():
 
 
 # ============================================================================
-# CRITIQUE 3: SAC vs Output Independence — Proper Terminology
+# CRITIQUE 3: SAC vs Output Independence - Proper Terminology
 # ============================================================================
 
 def critique_3_sac_vs_independence():
@@ -760,9 +760,9 @@ def critique_3_sac_vs_independence():
     if abs(r_delta) < 0.3:
         print(f"    ✓ Output differential is INDEPENDENT of input differential magnitude")
     elif abs(r_delta) < 0.6:
-        print(f"    △ Weak dependence detected — mild concern")
+        print(f"    △ Weak dependence detected - mild concern")
     else:
-        print(f"    ✗ Strong dependence — output Δ correlates with input Δ")
+        print(f"    ✗ Strong dependence - output Δ correlates with input Δ")
     
     # ---- CONCLUSION ----
     print(f"\n  {'═' * 85}")
@@ -1028,7 +1028,7 @@ def critique_4_aes_block_alignment():
 def main():
     print("╔" + "═" * 88 + "╗")
     print("║  ADVANCED CRYPTANALYTIC CRITIQUE RESOLUTION                                         ║")
-    print("║  ASSA ABLOY VERSO CLIQ Protocol — Conference-Grade Analysis Refinements             ║")
+    print("║  ASSA ABLOY VERSO CLIQ Protocol - Conference-Grade Analysis Refinements             ║")
     print("╚" + "═" * 88 + "╝")
     
     # Run all four critiques
@@ -1093,7 +1093,7 @@ def main():
             'uncorrected_significant': sum(1 for c in correlations if abs(c['r']) > 0.811),
             'expected_false_positives': 176 * 0.05,
             'bonferroni_significant': sum(1 for c in correlations if c['p_bonferroni'] < 0.05),
-            'verdict': 'Statistical artifact — no real correlations survive correction',
+            'verdict': 'Statistical artifact - no real correlations survive correction',
         },
         'critique_2': {
             'title': 'CRC-16 on MAC[20:22]',
