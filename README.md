@@ -124,8 +124,6 @@ The signal is a standard 1-Wire bus with pulse-width encoded data:
 
 The key acts as the bus master. The lock is the slave device and is powered by the key's battery through the contact pin.
 
-> **Decoder note.** The Python pulse decoder in `scripts/decode_signal.py` classifies pulses as '1' if `3 ≤ duration ≤ 7 µs` and as '0' if `duration > 11 µs`. Pulses in the 7-11 µs gap are silently dropped. The original Uni Rostock decoder (`data/previous_research/protocol_decoder.php`) uses a more robust state machine with explicit "short pulse followed by pause" / "long pulse followed by pause" patterns that handle end-of-byte transitions. Captures that produce misaligned bytes under the Python decoder should be re-decoded with the PHP variant.
-
 ---
 
 ## 3. Protocol Structure
