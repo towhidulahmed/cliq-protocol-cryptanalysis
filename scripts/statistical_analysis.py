@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """
-Statistical analyses for the CLIQ protocol cryptanalysis:
-  - Disjoint-pair chi-squared test on MAC XOR differentials
-  - Exact Student's t p-values for nonce-to-MAC correlations (via regularized
-    incomplete beta function)
-  - Explicit power analysis (Fisher z-transformation)
-  - Verification of which command bytes actually appear in the protocol
+Statistical analysis of the protocol fields of the 2024 unlock sessions
+(one entry per unique recording):
+  - nonce, ciphertext and MAC: bit balance and pairwise Hamming distance
+  - constant byte positions, overall and per key
+  - test whether the first 8 ciphertext bytes are the nonce XOR a fixed
+    keystream (would indicate keystream reuse)
+  - same-key vs cross-key MAC distance
+  - nonce-to-MAC / nonce-to-ciphertext byte correlations with exact
+    Student's t p-values, Bonferroni correction and power analysis
+If the 2014 University of Rostock decodes exist locally, the same summary
+numbers are also computed with them included. Only aggregates are reported.
 Output: statistical_analysis_results.json in the repo root.
 """
-import os, sys, math, json
-from collections import Counter
+import json
+import math
+import os
 from itertools import combinations
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, SCRIPT_DIR)
-from advanced_critique_analysis import NONCES, MACS, ENCRYPTED_PAYLOADS, hamming_distance_bytes
+from sessions import REPO_ROOT, load_captures, load_previous_research, unique
+
 
 # Exact t-distribution via regularized incomplete beta
 def log_beta(a, b):
@@ -96,26 +100,6 @@ def inverse_norm_cdf(p):
 def norm_cdf(z):
     return 0.5 * (1 + math.erf(z / math.sqrt(2)))
 
-# H1: disjoint pairs
-def disjoint_xor(captures, start, end):
-    out = []
-    for i in range(0, len(captures) - 1, 2):
-        a = captures[i][start:end]; b = captures[i+1][start:end]
-        out.extend(a[k] ^ b[k] for k in range(min(len(a), len(b))))
-    return out
-
-def allpair_xor(captures, start, end):
-    out = []
-    for i, j in combinations(range(len(captures)), 2):
-        a = captures[i][start:end]; b = captures[j][start:end]
-        out.extend(a[k] ^ b[k] for k in range(min(len(a), len(b))))
-    return out
-
-def chi_uniform(data):
-    freq = Counter(data); n = len(data); exp = n / 256.0
-    chi = sum((freq.get(i, 0) - exp) ** 2 / exp for i in range(256))
-    return chi, chi < 293.25  # df=255, alpha=0.05
-
 # Minimum detectable |r| via Fisher z
 def min_detectable_r(n, alpha, power):
     z_a = inverse_norm_cdf(1 - alpha / 2)
@@ -129,170 +113,196 @@ def power_for_r(n, alpha, r_true):
     se = 1.0 / math.sqrt(n - 3) if n > 3 else float('inf')
     return (1 - norm_cdf(z_a - z_r/se)) + norm_cdf(-z_a - z_r/se)
 
-# Verify which command bytes actually appear in the protocol
-def verify_c1():
-    prev_dir = os.path.join(REPO_ROOT, 'data', 'previous_research')
-    all_bytes = []
-    for fname in ['decoded_unlock_sessions.txt', 'session_key_a.txt', 'session_key_b.txt']:
-        fpath = os.path.join(prev_dir, fname)
-        if not os.path.exists(fpath):
-            continue
-        with open(fpath) as f:
-            for line in f:
-                if line.strip().startswith('hex:'):
-                    for h in line[4:].split():
-                        try: all_bytes.append(int(h, 16))
-                        except: pass
-    if not all_bytes:
-        return {
-            'total_bytes': 0,
-            'count_0x33': 0,
-            'positions_0x33': [],
-            'commands_sent': sorted([(hex(s), hex(c)) for s, c in [(1,1),(2,8),(3,10),(4,128)]]),
-            'has_0x33_command': False,
-            'note': '2014 raw data files not included in this repo. Commands verified from hardcoded data in advanced_critique_analysis.py.',
-        }
-    positions_33 = [i for i, b in enumerate(all_bytes) if b == 0x33]
-    cmds = set()
-    for i in range(len(all_bytes) - 3):
-        if all_bytes[i] == 0x82 and all_bytes[i+1] == 0x00:
-            cmds.add((all_bytes[i+2], all_bytes[i+3]))
-    return {
-        'total_bytes': len(all_bytes),
-        'count_0x33': len(positions_33),
-        'positions_0x33': positions_33,
-        'commands_sent': sorted([(hex(s), hex(c)) for s, c in cmds]),
-        'has_0x33_command': any(c == 0x33 for _, c in cmds),
-    }
+
+def bits(data):
+    return [(b >> i) & 1 for b in data for i in range(8)]
+
+
+def hamming(a, b):
+    return sum(bin(x ^ y).count('1') for x, y in zip(a, b))
+
+
+def bit_balance(fields):
+    """Fraction of one-bits and its z-score against p = 0.5."""
+    allbits = [x for f in fields for x in bits(f)]
+    n = len(allbits)
+    ones = sum(allbits)
+    return {'n_bits': n, 'ones_fraction': ones / n, 'z': (ones - n / 2) / math.sqrt(n / 4)}
+
+
+def pairwise_distance(fields):
+    """Mean pairwise Hamming distance as a fraction of the field length."""
+    nbits = len(fields[0]) * 8
+    d = [hamming(a, b) / nbits for a, b in combinations(fields, 2)]
+    return {'pairs': len(d), 'mean_fraction': sum(d) / len(d), 'min': min(d), 'max': max(d)}
+
+
+def constant_positions(fields):
+    return [i for i in range(len(fields[0])) if len({f[i] for f in fields}) == 1]
+
+
+def bit_positions(fields):
+    """Per-bit-position bias: smallest two-sided p (normal approximation with
+    continuity correction) and the number of positions below the Bonferroni level."""
+    n = len(fields)
+    n_pos = len(fields[0]) * 8
+    ps = []
+    for pos in range(n_pos):
+        k = sum((f[pos // 8] >> (pos % 8)) & 1 for f in fields)
+        z = (abs(k - n / 2) - 0.5) / math.sqrt(n / 4)
+        ps.append(math.erfc(max(z, 0.0) / math.sqrt(2)))
+    alpha = 0.05 / n_pos
+    return {'positions': n_pos, 'min_p': min(ps), 'alpha_bonferroni': alpha,
+            'significant': sum(1 for p in ps if p < alpha)}
+
+
+def field_summary(name, fields):
+    bal = bit_balance(fields)
+    dist = pairwise_distance(fields)
+    const = constant_positions(fields)
+    pos = bit_positions(fields)
+    uniq_vals = len({bytes(f) for f in fields})
+    print(f"  {name:10s} n={len(fields):2d}  unique={uniq_vals:2d}  ones={bal['ones_fraction']:.4f} "
+          f"(z={bal['z']:+.2f})  pairwise HD={dist['mean_fraction']*100:.1f}% "
+          f"[{dist['min']*100:.1f}-{dist['max']*100:.1f}]  constant bytes={const}  "
+          f"biased bit positions={pos['significant']}/{pos['positions']} (min p={pos['min_p']:.4f})")
+    return {'n': len(fields), 'unique': uniq_vals, 'bit_balance': bal,
+            'pairwise_distance': dist, 'constant_positions': const, 'bit_positions': pos}
+
+
+def correlations(xs, ys, x_name, y_name):
+    n = len(xs)
+    df = n - 2
+    n_tests = len(xs[0]) * len(ys[0])
+    alpha_bonf = 0.05 / n_tests
+    out = []
+    for i in range(len(xs[0])):
+        xv = [float(x[i]) for x in xs]
+        for j in range(len(ys[0])):
+            yv = [float(y[j]) for y in ys]
+            r = pearson(xv, yv)
+            t = r * math.sqrt(df) / math.sqrt(1 - r * r) if abs(r) < 1.0 else math.copysign(1e30, r)
+            p = t_sf_two_sided(t, df)
+            out.append({'x': i, 'y': j, 'r': r, 'p': p, 'p_bonf': min(1.0, p * n_tests)})
+    out.sort(key=lambda c: abs(c['r']), reverse=True)
+    n_unc = sum(1 for c in out if c['p'] < 0.05)
+    n_bonf = sum(1 for c in out if c['p_bonf'] < 0.05)
+    r80 = min_detectable_r(n, alpha_bonf, 0.80)
+    top = out[0]
+    print(f"  {x_name}->{y_name}: n={n}, {n_tests} tests, uncorrected p<0.05: {n_unc} "
+          f"(chance: {0.05*n_tests:.1f}), Bonferroni-significant: {n_bonf}, "
+          f"strongest r={top['r']:+.3f} ({x_name}[{top['x']}], {y_name}[{top['y']}]), "
+          f"min detectable |r| at 80% power={r80:.3f}")
+    return {'n': n, 'tests': n_tests, 'alpha_bonferroni': alpha_bonf,
+            'uncorrected_significant': n_unc, 'expected_by_chance': 0.05 * n_tests,
+            'bonferroni_significant': n_bonf, 'strongest': top,
+            'min_detectable_r_80pct_power': r80}
+
+
+def replicate(pair, xs, ys, label):
+    """Correlation of one byte pair in an independent sample."""
+    r = pearson([float(x[pair['x']]) for x in xs], [float(y[pair['y']]) for y in ys])
+    print(f"  replication of strongest {label} pair in 2014 data: r={r:+.3f} (n={len(xs)}; "
+          f"2024: r={pair['r']:+.3f})")
+    return {'r': r, 'n': len(xs)}
+
 
 def main():
-    print("╔" + "═" * 76 + "╗")
-    print("║  STATISTICAL ANALYSIS                                                    ║")
-    print("╚" + "═" * 76 + "╝")
-
+    print('=' * 78)
+    print('STATISTICAL ANALYSIS')
+    print('=' * 78)
     results = {}
+    uniq = unique(load_captures())
+    nonces = [s['nonce'] for s in uniq]
+    cts = [s['ciphertext'] for s in uniq]
+    macs = [s['mac'] for s in uniq]
 
-    # ---- Command byte verification ----
-    print("\n=== Command byte verification (0x33 claim) ===")
-    c1 = verify_c1()
-    print(f"  0x33 occurrences in raw stream: {c1['count_0x33']}")
-    print(f"  Positions: {c1['positions_0x33']}")
-    print(f"  Commands actually sent: {c1['commands_sent']}")
-    print(f"  Is 0x33 ever a command? {c1['has_0x33_command']}")
-    results['command_verification'] = c1
+    print(f"\n--- Field statistics, 2024 captures ({len(uniq)} unique sessions) ---")
+    results['fields'] = {
+        'nonce': field_summary('nonce', nonces),
+        'ciphertext': field_summary('ciphertext', cts),
+        'mac': field_summary('mac', macs),
+    }
 
-    # ---- Chi-squared with disjoint vs overlapping pairs ----
-    print("\n=== Chi-squared: disjoint vs overlapping pairs ===")
-    keys = sorted(MACS.keys()); macs = [MACS[k] for k in keys]; n = len(macs)
-    h1 = {}
-    for name, (s, e) in {'MAC[0:20]': (0, 20), 'MAC[20:22]': (20, 22), 'MAC[0:22]': (0, 22)}.items():
-        overlap = allpair_xor(macs, s, e)
-        disjoint = disjoint_xor(macs, s, e)
-        chi_o, _ = chi_uniform(overlap)
-        chi_d, _ = chi_uniform(disjoint)
-        reliable = len(disjoint) / 256 >= 5
-        h1[name] = {
-            'overlap_chi2': chi_o, 'overlap_n': len(overlap),
-            'disjoint_chi2': chi_d, 'disjoint_n': len(disjoint),
-            'disjoint_reliable': reliable,
+    print('\n--- Per key ---')
+    groups = {}
+    for s in uniq:
+        groups.setdefault(s['folder'], []).append(s)
+    results['groups'] = {}
+    for kid, g in groups.items():
+        print(f"  {kid}:")
+        results['groups'][kid] = {
+            'ciphertext': field_summary('ciphertext', [s['ciphertext'] for s in g]),
+            'mac': field_summary('mac', [s['mac'] for s in g]),
         }
-        print(f"  {name}:")
-        print(f"    Overlapping pairs: n={len(overlap)}, chi2={chi_o:.1f}")
-        print(f"    Disjoint pairs:    n={len(disjoint)}, chi2={chi_d:.1f} ({'reliable' if reliable else 'UNRELIABLE: expected count < 5'})")
-    results['chi_squared'] = h1
 
-    # ---- Exact p-values for nonce-to-MAC correlations ----
-    print("\n=== Exact p-values for nonce-to-MAC correlations ===")
-    paired = sorted([k for k in NONCES if k in MACS])
-    n_paired = len(paired); df = n_paired - 2
-    n_tests = 8 * 22; alpha_bonf = 0.05 / n_tests
-    print(f"  n={n_paired}, df={df}, Bonferroni alpha={alpha_bonf:.6f}")
-    corrs = []
-    for ni in range(8):
-        nv = [float(NONCES[k][ni]) for k in paired]
-        for mi in range(22):
-            mv = [float(MACS[k][mi]) for k in paired]
-            r = pearson(nv, mv)
-            if abs(r) < 1.0:
-                t = r * math.sqrt(df) / math.sqrt(1 - r * r)
-            else:
-                t = math.copysign(1e30, r)
-            p_exact = t_sf_two_sided(t, df)
-            corrs.append({'ni': ni, 'mi': mi, 'r': r, 't': t, 'p': p_exact, 'p_bonf': min(1.0, p_exact * n_tests)})
-    corrs.sort(key=lambda c: abs(c['r']), reverse=True)
-    print(f"\n  Top 10 correlations by |r|:")
-    print(f"  {'Nonce[i]':>9} {'MAC[j]':>7} {'r':>9} {'t':>10} {'p (exact)':>12} {'p (Bonf.)':>12}")
-    for c in corrs[:10]:
-        print(f"  Nonce[{c['ni']}]  MAC[{c['mi']:>2}]  {c['r']:>8.4f} {c['t']:>9.3f}  {c['p']:>11.5f}  {c['p_bonf']:>11.5f}")
-    n_unc = sum(1 for c in corrs if c['p'] < 0.05)
-    n_bonf = sum(1 for c in corrs if c['p_bonf'] < 0.05)
-    print(f"\n  Uncorrected significant: {n_unc} (expected by chance: {0.05*n_tests:.1f})")
-    print(f"  Bonferroni-significant: {n_bonf}")
+    print('\n--- Keystream-reuse test: ciphertext[0:8] XOR nonce, per key ---')
+    results['keystream_reuse'] = {}
+    for kid, g in groups.items():
+        x = {bytes(a ^ b for a, b in zip(s['ciphertext'][:8], s['nonce'])) for s in g}
+        reused = len(x) < len(g)
+        print(f"  {kid}: {len(x)} distinct values over {len(g)} sessions -> "
+              f"{'REUSE' if reused else 'no fixed keystream'}")
+        results['keystream_reuse'][kid] = {'sessions': len(g), 'distinct': len(x), 'reuse': reused}
+
+    print('\n--- MAC distance: same key vs cross key ---')
+    same, cross = [], []
+    for a, b in combinations(uniq, 2):
+        d = hamming(a['mac'], b['mac']) / (len(a['mac']) * 8)
+        (same if a['folder'] == b['folder'] else cross).append(d)
+    print(f"  same key:  {len(same):3d} pairs, mean {sum(same)/len(same)*100:.1f}%")
+    print(f"  cross key: {len(cross):3d} pairs, mean {sum(cross)/len(cross)*100:.1f}%")
+    results['mac_same_vs_cross'] = {'same_pairs': len(same), 'same_mean': sum(same) / len(same),
+                                    'cross_pairs': len(cross), 'cross_mean': sum(cross) / len(cross)}
+
+    print('\n--- Byte correlations (Pearson, exact t, Bonferroni) ---')
     results['correlations'] = {
-        'n_paired': n_paired, 'n_tests': n_tests, 'alpha_bonferroni': alpha_bonf,
-        'uncorrected_significant': n_unc, 'expected_fp': 0.05 * n_tests,
-        'bonferroni_significant': n_bonf,
-        'top_5': corrs[:5],
+        'nonce_mac': correlations(nonces, macs, 'nonce', 'MAC'),
+        'nonce_ciphertext': correlations(nonces, cts, 'nonce', 'ciphertext'),
     }
 
-    # ---- Power analysis ----
-    print("\n=== Power analysis at n=6 ===")
-    for power in [0.50, 0.80, 0.90, 0.95]:
-        r_min = min_detectable_r(n_paired, alpha_bonf, power)
-        print(f"  At power={power:.2f}: minimum detectable |r| = {r_min:.4f}")
-    print(f"\n  Power to detect |r|=0.9: {power_for_r(n_paired, alpha_bonf, 0.9):.3f}")
-    print(f"  Power to detect |r|=0.7: {power_for_r(n_paired, alpha_bonf, 0.7):.3f}")
-    print(f"  Power to detect |r|=0.5: {power_for_r(n_paired, alpha_bonf, 0.5):.3f}")
-    results['power_analysis'] = {
-        'n': n_paired, 'alpha_bonferroni': alpha_bonf,
-        'min_detectable_r_at_80pct_power': min_detectable_r(n_paired, alpha_bonf, 0.80),
-        'power_for_r_0.9': power_for_r(n_paired, alpha_bonf, 0.9),
-        'power_for_r_0.7': power_for_r(n_paired, alpha_bonf, 0.7),
-        'power_for_r_0.5': power_for_r(n_paired, alpha_bonf, 0.5),
-    }
+    prev = load_previous_research()
+    print('\n--- Including 2014 University of Rostock decodes (local only, aggregates) ---')
+    if prev is None:
+        print('  Not available. The 2014 data is not part of this repository.')
+        results['with_previous_research'] = None
+    else:
+        p_n = [s['nonce'] for s in prev if s['nonce']]
+        p_c = [s['ciphertext'] for s in prev if s['ciphertext']]
+        p_m = [s['mac'] for s in prev if s['mac']]
+        overlap = {
+            'nonce': len({bytes(x) for x in p_n} & {bytes(x) for x in nonces}),
+            'ciphertext': len({bytes(x) for x in p_c} & {bytes(x) for x in cts}),
+            'mac': len({bytes(x) for x in p_m} & {bytes(x) for x in macs}),
+        }
+        print(f"  2014 fields: {len(p_n)} nonces, {len(p_c)} ciphertexts, {len(p_m)} MACs")
+        print(f"  Values shared between 2014 and 2024: {overlap}")
+        print('  2014 only:')
+        only = {'nonce': field_summary('nonce', p_n), 'ciphertext': field_summary('ciphertext', p_c),
+                'mac': field_summary('mac', p_m)}
+        print('  2014 and 2024 pooled:')
+        pooled = {'nonce': field_summary('nonce', nonces + p_n),
+                  'ciphertext': field_summary('ciphertext', cts + p_c),
+                  'mac': field_summary('mac', macs + p_m)}
+        both_nc = [s for s in prev if s['nonce'] and s['ciphertext']]
+        both_nm = [s for s in prev if s['nonce'] and s['mac']]
+        rep = {
+            'nonce_ciphertext': replicate(results['correlations']['nonce_ciphertext']['strongest'],
+                                          [s['nonce'] for s in both_nc], [s['ciphertext'] for s in both_nc],
+                                          'nonce->ciphertext'),
+            'nonce_mac': replicate(results['correlations']['nonce_mac']['strongest'],
+                                   [s['nonce'] for s in both_nm], [s['mac'] for s in both_nm], 'nonce->MAC'),
+        }
+        results['with_previous_research'] = {
+            'counts': {'nonce': len(p_n), 'ciphertext': len(p_c), 'mac': len(p_m)},
+            'shared_values': overlap, 'only_2014': only, 'pooled': pooled, 'replication': rep,
+        }
 
-    # ---- AES mode interpretations ----
-    print("\n=== AES mode interpretations ===")
-    h2_modes = [
-        ('AES-CTR', 'Consistent. 24B stream-encrypted, 8 zeros are plaintext framing.'),
-        ('AES-CBC zero-pad', 'Consistent if receiver treats last 8B as plaintext zeros post-decrypt. Unverifiable passively.'),
-        ('AES-CBC-CTS', 'Consistent. NIST SP 800-38A. 24B to 24B ct, no padding expansion.'),
-        ('Single-block AES + 8B unencrypted metadata', 'Consistent. First 16B encrypted, next 8B static protocol field.'),
-        ('AES-ECB', 'Cannot rule out at n=7. Detecting ECB needs ~2^32 captures.'),
-    ]
-    for mode, verdict in h2_modes:
-        print(f"  - {mode}: {verdict}")
-    results['aes_modes'] = {'modes': h2_modes}
+    out = os.path.join(REPO_ROOT, 'statistical_analysis_results.json')
+    with open(out, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f'\nSaved: {out}')
 
-    # ---- Verified statistics ----
-    print("\n=== Verified statistics ===")
-    pairs = list(combinations(paired, 2))
-    hds = [hamming_distance_bytes(MACS[k1], MACS[k2]) for k1, k2 in pairs]
-    mean_hd = sum(hds) / len(hds)
-    print(f"  Mean MAC Hamming distance (22B): {mean_hd:.2f}/176 = {mean_hd/176*100:.2f}%")
-
-    # Per-bit flip probability
-    flips = []
-    for k1, k2 in pairs:
-        for bi in range(22):
-            for bit in range(8):
-                b1 = (MACS[k1][bi] >> bit) & 1
-                b2 = (MACS[k2][bi] >> bit) & 1
-                flips.append(1 if b1 != b2 else 0)
-    print(f"  Per-bit flip probability: {sum(flips)/len(flips):.4f}")
-
-    # Nonce uniqueness
-    nonce_strs = [' '.join(f'{b:02X}' for b in NONCES[k]) for k in NONCES]
-    print(f"  Unique nonces: {len(set(nonce_strs))}/{len(NONCES)}")
-    for pos in range(8):
-        vals = [NONCES[k][pos] for k in NONCES]
-        print(f"    Nonce byte {pos}: {len(set(vals))}/{len(vals)} unique")
-
-    # Save
-    out_path = os.path.join(REPO_ROOT, 'statistical_analysis_results.json')
-    with open(out_path, 'w') as f:
-        json.dump(results, f, indent=2, default=str)
-    print(f"\nSaved: {out_path}")
 
 if __name__ == '__main__':
     main()

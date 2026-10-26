@@ -24,8 +24,9 @@ venv/
 Logic Analyser/
 
 # Generated output
-crypto_analysis_results.json
-v2_statistics.json
-crc_bruteforce_results.json
-statistical_analysis_results.json
-data/local_previous_research/
+*_results.json
+
+# 2014 University of Rostock data: local reference only, never committed.
+# Only the folder's README (how to request access) is published.
+data/local_previous_research/*
+!data/local_previous_research/README.md

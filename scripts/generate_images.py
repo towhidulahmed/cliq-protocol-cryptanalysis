@@ -1,269 +1,366 @@
 #!/usr/bin/env python3
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.font_manager as fm
-fm.fontManager.addfont('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf')
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
+"""
+Generates assets/protocol_flow.png and assets/packet_format.png.
+
+Both figures are laid out as HTML (absolutely positioned elements, inline
+styles) from the decoded 2024 sessions, so every number in them is computed,
+and rendered to PNG at 2x with headless Chromium. Requires Playwright:
+
+    pip install playwright
+    python -m playwright install chromium
+
+Pass --html to also write the HTML sources next to the PNGs.
+"""
 import os
-from PIL import Image
+import statistics
+import sys
 
-plt.rcParams['font.family'] = 'DejaVu Sans Mono'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sessions import REPO_ROOT, load_captures, unique
 
-K = '#000000'
-W = '#FFFFFF'
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 OUT = os.path.join(REPO_ROOT, 'assets')
-os.makedirs(OUT, exist_ok=True)
 
-def strip_meta(path):
-    """Convert to RGB, strip metadata, and crop all-white borders."""
-    img = Image.open(path)
-    if img.mode == 'RGBA':
-        bg = Image.new('RGBA', img.size, (255, 255, 255, 255))
-        bg.paste(img, mask=img.split()[3])
-        img = bg.convert('RGB')
-    elif img.mode != 'RGB':
-        img = img.convert('RGB')
-    # Crop all-white borders (tolerance: any pixel with all RGB > 250)
-    from PIL import ImageChops
-    bg = Image.new('RGB', img.size, (255, 255, 255))
-    diff = ImageChops.difference(img, bg)
-    bbox = diff.getbbox()
-    if bbox:
-        # Add 5px padding
-        pad = 5
-        l = max(0, bbox[0] - pad)
-        t = max(0, bbox[1] - pad)
-        r = min(img.size[0], bbox[2] + pad)
-        b = min(img.size[1], bbox[3] + pad)
-        img = img.crop((l, t, r, b))
-    img.save(path, format='PNG', optimize=True)
+# Design tokens
+GROUND = '#F6F5F1'
+INK = '#1C1E23'
+MUTED = '#5B5F66'
+RULE = '#D5D1C7'
+LIFELINE = '#B9B4A8'
+ARROW = '#2B2E35'
+BUSY = '#9E998D'
+AMBER = ('#FBE7CF', '#E3AE72', '#8A4208')    # fill, border, ink: plaintext identifiers
+BLUE = ('#DBE7F6', '#9DBBE3', '#1D4C87')     # cryptographic fields
+GREY = ('#ECEAE4', '#CFCBC1', '#3A3D44')     # framing, constants
+SANS = "'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif"
+MONO = "'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace"
+FONTS = ('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
+         'family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">')
+W = 1400
 
-def make_protocol_flow():
-    fig, ax = plt.subplots(figsize=(14, 15), facecolor='white')
-    ax.set_xlim(0, 100)
-    ax.set_ylim(24, 118)
-    ax.axis('off')
-    ax.set_aspect('auto')
 
-    ax.text(50, 116, 'CLIQ 1-Wire Protocol',
-            ha='center', va='center', fontsize=22, fontweight='bold', color=K)
-    ax.text(50, 113.5, 'Communication Flow - Four-Phase Challenge-Response Unlock Session',
-            ha='center', va='center', fontsize=11, color=K, style='italic')
-    ax.plot([10, 90], [111.5, 111.5], color=K, linewidth=1.2)
-    ax.text(50, 109.5, '~255 bytes  |  ~7.6 ms  |  1-Wire bus  |  pulse-width encoded',
-            ha='center', va='center', fontsize=9, color=K)
+def page(title, width, height, body):
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+{FONTS}
+<style>body{{margin:0;background:{GROUND}}}</style>
+</head>
+<body>
+<div id="figure" style="position: relative; width: {width}px; height: {height}px; background: {GROUND}; color: {INK}; font-family: {SANS}">
+{body}
+</div>
+</body>
+</html>
+'''
 
-    ax.text(25, 106, 'KEY  (master)', ha='center', va='center',
-            fontsize=10, fontweight='bold', color=K)
-    ax.text(75, 106, 'LOCK  (slave)', ha='center', va='center',
-            fontsize=10, fontweight='bold', color=K)
 
-    def draw_phase(y_top, num, title, desc, k2l, l2k, note=None):
-        bl, br = 8, 92
-        hh = 3.0
-        n_lines = max(len(k2l), len(l2k))
-        ch = n_lines * 1.5 + 2.0
-        if note:
-            ch += 2.0
-        yb = y_top - hh - ch
+def text(x, y, content, size=15, weight=400, color=INK, width=None, family=SANS, align='left', extra=''):
+    w = f' width: {width}px;' if width else ''
+    return (f'<div style="position: absolute; left: {x}px; top: {y}px;{w} font-family: {family}; '
+            f'font-size: {size}px; line-height: {round(size * 1.4)}px; font-weight: {weight}; '
+            f'color: {color}; text-align: {align};{extra}">{content}</div>')
 
-        ax.text(bl + 1.5, y_top - hh/2, f'PHASE {num}:  {title}',
-                ha='left', va='center', fontsize=10, fontweight='bold', color=K)
-        ax.text(br - 1.5, y_top - hh/2, desc,
-                ha='right', va='center', fontsize=8, color=K, style='italic')
-        ax.plot([bl, br], [y_top - hh, y_top - hh], color=K, linewidth=1.0)
-        ax.add_patch(Rectangle((bl, yb), br - bl, ch,
-                                facecolor=W, edgecolor=K, linewidth=0.8, fill=False))
 
-        y = y_top - hh - 1.5
-        ax.text(25, y, 'Key -> Lock', ha='center', va='center',
-                fontsize=8, fontweight='bold', color=K,
-                bbox=dict(boxstyle='square,pad=0.3', facecolor=W,
-                          edgecolor=K, linewidth=0.5))
-        y -= 1.6
-        for line in k2l:
-            ax.text(25, y, line, ha='center', va='center',
-                    fontsize=7.5, color=K)
-            y -= 1.4
+def pill(label, colors, mono=False):
+    fill, border, ink = colors
+    family = MONO if mono else SANS
+    return (f'<span style="display: inline-block; padding: 0 7px; margin: 0 2px; border-radius: 4px; '
+            f'background: {fill}; border: 1px solid {border}; color: {ink}; font-family: {family}; '
+            f'font-size: 12px; line-height: 20px; font-weight: 500; vertical-align: 1px">{label}</span>')
 
-        y = y_top - hh - 1.5
-        ax.text(75, y, 'Lock -> Key', ha='center', va='center',
-                fontsize=8, fontweight='bold', color=K,
-                bbox=dict(boxstyle='square,pad=0.3', facecolor=W,
-                          edgecolor=K, linewidth=0.5))
-        y -= 1.6
-        for line in l2k:
-            ax.text(75, y, line, ha='center', va='center',
-                    fontsize=7.5, color=K)
-            y -= 1.4
 
-        if note:
-            ax.text(50, yb + 1.2, note, ha='center', va='center',
-                    fontsize=7.5, color=K, style='italic')
-        return yb
+def mono(s, color=INK):
+    return f'<span style="font-family: {MONO}; color: {color}">{s}</span>'
 
-    def arrow(x, yt, yb):
-        ax.annotate('', xy=(x, yb), xytext=(x, yt),
-                    arrowprops=dict(arrowstyle='->', color=K, lw=1.0))
 
-    y = 103.5
-    yb = draw_phase(y, 1, 'IDENTITY EXCHANGE', 'plaintext system ID + key ID + counter',
-        ['82 00 01 01 1B 03', '56 31 30 30 34 XX XX XX', '1E 1E 1E 1E 1E 1E 1E',
-         '41 02 00 08 01 04', '[6B counter] [CRC]'],
-        ['00 01 11 18 03', '56 31 30 30 34 XX XX XX', '1E 1E 1E 1E 1E 1E 1E',
-         '61 90 01 01 00 04 00 00', '[CRC]'],
-        'System ID "V1004XXX" sent in PLAINTEXT.  Bytes 27-28 = key identifier (visible in clear).')
-    arrow(50, yb - 0.5, yb - 3.0)
+def hline(x, y, length, color=RULE, width=1, dash=None):
+    style = f'border-top: {width}px {"dashed" if dash else "solid"} {color}'
+    return f'<div style="position: absolute; left: {x}px; top: {y}px; width: {length}px; height: 0; {style}"></div>'
 
-    y = yb - 3.5
-    yb = draw_phase(y, 2, 'NONCE EXCHANGE  (CHALLENGE)', 'lock emits 8 random bytes',
-        ['82 00 02 08 00', '[CRC]', '', '(read memory', ' command)'],
-        ['00 02 11 08', 'DC AF E0 29 A9 9C 5B 95', '[CRC]', '', '(8-byte', ' challenge nonce)'],
-        '7 captures: all unique nonces, mean pairwise Hamming ~ 50.1%.  Nonce generation looks solid.')
-    arrow(50, yb - 0.5, yb - 3.0)
 
-    y = yb - 3.5
-    yb = draw_phase(y, 3, 'ENCRYPTED AUTHENTICATION PAYLOAD', '24B ciphertext + 8B plaintext zeros',
-        ['82 00 03 0A 20', '[ 24B ciphertext  ]', '[ dynamic/session ]',
-         '00 00 00 00 00 00 00 00', '[CRC]'],
-        ['ACCEPT:', '00 03 11 18', '[24 zero bytes]', '50', '',
-         'REJECT:', '00 03 21 00 58'],
-        'AES-128 stream-compatible mode (CTR / CBC-zero-pad / CBC-CTS).  '
-        '8 zero bytes are PLAINTEXT (static across all 23 captures).')
-    arrow(50, yb - 0.5, yb - 3.0)
+def vline(x, y, length, color=LIFELINE, width=2):
+    return (f'<div style="position: absolute; left: {x - width // 2}px; top: {y}px; width: {width}px; '
+            f'height: {length}px; background: {color}"></div>')
 
-    y = yb - 3.5
-    yb = draw_phase(y, 4, 'MAC VERIFICATION', '22B MAC = 20B SHA-1 + 2B status',
-        ['82 00 04 80 15', '[ 20B SHA-1 digest ]', '[ 2B device status  ]', '',
-         'matches DS28EC20', 'Compute MAC command'],
-        ['00 04 11 02 01 01', '63', '', '-> motor activates,', '   key can be turned'],
-        'Stats (n=6):  mean Hamming distance 50.04%  |  per-bit flip probability 0.5004  (textbook)')
 
-    out = os.path.join(OUT, 'protocol_flow.png')
-    plt.savefig(out, dpi=150, facecolor='white', bbox_inches='tight',
-                pad_inches=0.05, edgecolor='none')
-    plt.close(fig)
-    strip_meta(out)
-    print(f'protocol_flow.png: {os.path.getsize(out)/1024:.0f} KB')
+ARROW_ID = [0]
 
-def make_aes_block():
-    fig, ax = plt.subplots(figsize=(14, 10), facecolor='white')
-    ax.set_xlim(0, 100)
-    ax.set_ylim(0, 72)
-    ax.axis('off')
-    ax.set_aspect('auto')
 
-    ax.text(50, 70, 'Phase-3 Payload: 32 Bytes = 2 x AES-128 Block Boundaries',
-            ha='center', va='center', fontsize=15, fontweight='bold', color=K)
-    ax.plot([8, 92], [68.5, 68.5], color=K, linewidth=1.0)
+def arrow(x1, x2, y, color=ARROW, width=2, dash=False):
+    """Horizontal arrow from x1 to tip x2 (either direction), one svg per segment."""
+    ARROW_ID[0] += 1
+    n = abs(x2 - x1)
+    h = 2 * width
+    left = min(x1, x2)
+    d = f'M 0 4 L {n - h} 4' if x2 > x1 else f'M {n} 4 L {h} 4'
+    dash_css = '; stroke-dasharray: 5 5' if dash else ''
+    mid = f'dc-arrow-head-filled-{ARROW_ID[0]}'
+    return (f'<svg width="{n}" height="8" viewBox="0 0 {n} 8" preserveAspectRatio="none" '
+            f'style="position: absolute; left: {left}px; top: {y - 4}px; width: {n}px; height: 8px; '
+            f'overflow: visible; fill: none; stroke: {color}; stroke-width: {width}; stroke-linecap: round; '
+            f'stroke-linejoin: round{dash_css}"><defs><marker id="{mid}" orient="auto" markerWidth="5" '
+            f'markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="{color}" '
+            f'stroke="none" style="stroke: none; fill: {color}; fill: context-stroke"/></marker></defs>'
+            f'<path d="{d}" marker-end="url(#{mid})"></path></svg>')
 
-    # Byte ruler
-    ax.text(50, 66, 'Byte Layout',
-            ha='center', va='center', fontsize=11, fontweight='bold', color=K)
 
-    x_start = 14
-    cell_w = 2.2
-    y_cell = 52
-    cell_h = 6
+def legend(right, y):
+    items = [('plaintext identifier', AMBER), ('cryptographic field', BLUE), ('framing / constant', GREY)]
+    html = ''.join(f'<span style="display: flex; align-items: center; gap: 8px">'
+                   f'<span style="width: 14px; height: 14px; border-radius: 3px; background: {c[0]}; '
+                   f'border: 1px solid {c[1]}"></span>{label}</span>' for label, c in items)
+    return (f'<div style="position: absolute; right: {right}px; top: {y}px; display: flex; gap: 20px; '
+            f'font-size: 13px; line-height: 20px; color: {MUTED}">{html}</div>')
 
-    # Ruler marks
-    for pos in [0, 8, 16, 24, 32]:
-        x = x_start + pos * cell_w
-        ax.text(x, 62, str(pos), ha='center', va='center', fontsize=8, color=K)
-        ax.plot([x, x], [60.5, 59], color=K, linewidth=0.5)
 
-    # 24 ciphertext bytes
-    ax.add_patch(Rectangle((x_start, y_cell), 24 * cell_w, cell_h,
-                            facecolor=W, edgecolor=K, linewidth=1.0))
-    ax.text(x_start + 12 * cell_w, y_cell + cell_h/2, 'CIPHERTEXT  (24 bytes, dynamic)',
-            ha='center', va='center', fontsize=9, fontweight='bold', color=K)
+# ---------------------------------------------------------------------------
+# Figure 1: unlock sequence
+# ---------------------------------------------------------------------------
 
-    # 8 zero bytes
-    ax.add_patch(Rectangle((x_start + 24 * cell_w, y_cell), 8 * cell_w, cell_h,
-                            facecolor=W, edgecolor=K, linewidth=1.0))
-    ax.text(x_start + 28 * cell_w, y_cell + cell_h/2, 'PLAINTEXT ZEROS  (8B, static)',
-            ha='center', va='center', fontsize=8, color=K)
+def waits(uniq, code):
+    ws = [w for s in uniq for w in s['timing']['waits'] if w['after_code'] == code]
+    polls = sorted({w['polls'] for w in ws})
+    p = f'{polls[0]}' if len(polls) == 1 else f'{polls[0]}-{polls[-1]}'
+    return f'{p} busy polls · {min(w["ms"] for w in ws):.1f}-{max(w["ms"] for w in ws):.1f} ms'
 
-    # Trailing byte
-    ax.add_patch(Rectangle((x_start + 32 * cell_w, y_cell), cell_w, cell_h,
-                            facecolor=W, edgecolor=K, linewidth=1.0, linestyle='--'))
-    ax.text(x_start + 32.5 * cell_w, y_cell + cell_h/2, '??',
-            ha='center', va='center', fontsize=8, color=K)
 
-    # Block brackets
-    for bx_start, bx_end, label in [
-        (x_start, x_start + 16 * cell_w, 'AES Block 1  (bytes 0-15)'),
-        (x_start + 16 * cell_w, x_start + 32 * cell_w, 'AES Block 2  (bytes 16-31)'),
-    ]:
-        ax.plot([bx_start, bx_end], [y_cell - 2, y_cell - 2], color=K, lw=1.2)
-        ax.plot([bx_start, bx_start], [y_cell - 1.5, y_cell - 2.5], color=K, lw=1.2)
-        ax.plot([bx_end, bx_end], [y_cell - 1.5, y_cell - 2.5], color=K, lw=1.2)
-        ax.text((bx_start + bx_end) / 2, y_cell - 4, label,
-                ha='center', va='center', fontsize=9, fontweight='bold', color=K)
-
-    ax.text(x_start + 16 * cell_w, y_cell - 6.5, '2 x AES-128 blocks = 32 bytes',
-            ha='center', va='center', fontsize=8, color=K, style='italic')
-
-    # Key Observation box
-    y_obs = 38
-    obs_h = 9
-    ax.add_patch(Rectangle((8, y_obs - obs_h), 84, obs_h,
-                            facecolor=W, edgecolor=K, linewidth=1.0, fill=False))
-    ax.text(10, y_obs - 1.5, 'KEY OBSERVATION',
-            ha='left', va='center', fontsize=10, fontweight='bold', color=K)
-    obs_lines = [
-        '- 24-byte ciphertext is NOT block-aligned (1.5 blocks)',
-        '- 24 + 8 = 32 bytes = exactly 2 AES-128 blocks',
-        '- 8 zero bytes are PLAINTEXT (always 0x00 across all captures)',
-        '- Standard CBC+PKCS#7 would produce 32B ct, not 24B ct + 8B pt',
+def protocol_flow(uniq):
+    KX, CX = 440, W - 64 - 140
+    totals = [s['timing']['total_ms'] for s in uniq]
+    poll = {k: statistics.mean(s['timing']['poll_interval_ms'] for s in uniq if s['folder'] == k)
+            for k in ('key_a', 'key_b')}
+    A = lambda s: pill(s, AMBER)
+    B = lambda s: pill(s, BLUE)
+    G = lambda s: pill(s, GREY)
+    K2C, C2K = 'k2c', 'c2k'
+    steps = [
+        ('1', 'Identity', '29-byte format', [
+            ('arrow', K2C, mono('82 00 01 01 1D') + A('system ID') + A('key config') + A('date · time') + G('0E 00')),
+            ('arrow', C2K, mono('84 00 01 34 00 47') + '&nbsp; refused, ' + mono('error 0x34')),
+        ]),
+        ('2', 'Identity', 'key falls back to the 2014 format', [
+            ('arrow', K2C, mono('82 00 02 01 1B') + A('system ID') + A('key config') + A('date · time')),
+            ('busy', C2K, mono('84 00 02 10 00') + '&nbsp; busy'),
+            ('wait', waits(uniq, 0x01)),
+            ('arrow', C2K, mono('84 00 02 11 18') + A('system ID') + A('cylinder no.')),
+        ]),
+        ('3', 'Challenge', 'cylinder generates the nonce', [
+            ('arrow', K2C, mono('82 00 03 08 00')),
+            ('busy', C2K, mono('84 00 03 10 00') + '&nbsp; busy'),
+            ('wait', waits(uniq, 0x08)),
+            ('arrow', C2K, mono('84 00 03 11 08') + B('nonce · 8 B')),
+        ]),
+        ('4', 'Encrypted block', 'authorization is decided here', [
+            ('arrow', K2C, mono('82 00 04 0A 20') + B('encrypted · 24 B') + G('00 × 8')),
+            ('busy', C2K, mono('84 00 04 10 00') + '&nbsp; busy'),
+            ('wait', waits(uniq, 0x0A)),
+            ('arrow', C2K, mono('84 00 04 11 18') + G('00 × 24') + '&nbsp; or, unauthorized key, '
+             + mono('error 0x21')),
+        ]),
+        ('5', 'MAC', 'verified by the cylinder', [
+            ('arrow', K2C, mono('82 00 05 80 15') + B('MAC · 21 B')),
+            ('busy', C2K, mono('84 00 05 10 00') + '&nbsp; busy'),
+            ('wait', waits(uniq, 0x80)),
+            ('arrow', C2K, mono('84 00 05 11 02 01 01') + '&nbsp; cylinder releases'),
+        ]),
     ]
-    for i, line in enumerate(obs_lines):
-        ax.text(12, y_obs - 3.5 - i * 1.4, line,
-                ha='left', va='center', fontsize=8, color=K)
 
-    # Mode Consistency
-    y_mode = 24
-    ax.text(50, y_mode, 'MODE CONSISTENCY ANALYSIS',
-            ha='center', va='center', fontsize=11, fontweight='bold', color=K)
-    ax.plot([30, 70], [y_mode - 1.5, y_mode - 1.5], color=K, linewidth=0.8)
+    el = []
+    el.append(text(64, 56, 'Unlock sequence', size=30, weight=600))
+    el.append(text(64, 104, f'VERSO CLIQ key and cylinder, 2024 captures &nbsp;·&nbsp; {len(uniq)} sessions, '
+                            f'2 keys, 2 cylinders &nbsp;·&nbsp; {min(totals):.1f}-{max(totals):.1f} ms per unlock',
+                   size=15, color=MUTED))
+    el.append(legend(64, 64))
 
-    # Two columns
-    col_y = y_mode - 4
-    ax.text(8, col_y, 'CONSISTENT (cannot be ruled out):',
-            ha='left', va='center', fontsize=9, fontweight='bold', color=K)
-    consistent = [
-        'AES-CTR',
-        'AES-CBC + zero-padding',
-        'AES-CBC-CTS (NIST 800-38A)',
-        'Single-block AES-CBC + 8B metadata',
-        'AES-ECB (cannot rule out at n=7)',
+    # Lifeline heads
+    for x, name, sub in ((KX, 'Key', 'bus master · powers the cylinder'),
+                         (CX, 'Cylinder', 'no battery · keeps rights and audit log')):
+        el.append(f'<div style="position: absolute; left: {x - 140}px; top: 164px; width: 280px; height: 64px; '
+                  f'box-sizing: border-box; display: flex; align-items: center; justify-content: center; '
+                  f'text-align: center; background: #FFFFFF; border: 1px solid {RULE}; border-radius: 8px">'
+                  f'<span><b style="font-size: 16px; font-weight: 600">{name}</b><br>'
+                  f'<span style="font-size: 12px; color: {MUTED}">{sub}</span></span></div>')
+
+    y = 268
+    rows = []
+    for i, (num, title, note, items) in enumerate(steps):
+        if i:
+            rows.append(hline(64, y, W - 128))
+            y += 24
+        top = y
+        rows.append(text(64, top, f'STEP {num}', size=12, weight=600, color=MUTED,
+                         extra=' letter-spacing: 0.08em;'))
+        rows.append(text(64, top + 20, title, size=17, weight=600, width=240))
+        rows.append(text(64, top + 46, note, size=13, color=MUTED, width=230))
+        for item in items:
+            if item[0] == 'wait':
+                rows.append(f'<div style="position: absolute; left: {KX + 24}px; top: {y + 2}px; '
+                            f'width: {CX - KX - 48}px; display: flex; align-items: center; gap: 12px; '
+                            f'font-size: 13px; line-height: 20px; color: {MUTED}">'
+                            f'<span style="flex: 1; border-top: 1px dotted {BUSY}"></span>{item[1]}'
+                            f'<span style="flex: 1; border-top: 1px dotted {BUSY}"></span></div>')
+                y += 36
+                continue
+            kind, direction, label = item
+            busy = kind == 'busy'
+            rows.append(f'<div style="position: absolute; left: {KX + 20}px; top: {y}px; width: {CX - KX - 40}px; '
+                        f'text-align: center; font-size: 13px; line-height: 22px; '
+                        f'color: {MUTED if busy else INK}">{label}</div>')
+            ay = y + 34
+            if direction == K2C:
+                rows.append(arrow(KX + 2, CX - 3, ay, BUSY if busy else ARROW, 1.5 if busy else 2, busy))
+            else:
+                rows.append(arrow(CX - 2, KX + 3, ay, BUSY if busy else ARROW, 1.5 if busy else 2, busy))
+            y += 60
+        y = max(y, top + 92) + 8
+
+    el.insert(0, vline(KX, 228, y - 228))
+    el.insert(1, vline(CX, 228, y - 228))
+    el.extend(rows)
+
+    y += 16
+    el.append(hline(64, y, W - 128))
+    el.append(text(64, y + 20,
+                   f'Every packet is {mono("[82|84] 00 SEQ CODE LEN DATA CHK")}; all its bytes sum to '
+                   f'{mono("0x00")} mod 256. While the cylinder is busy, the key reads one status bit every '
+                   f'{poll["key_a"]:.3f} ms (key A) or {poll["key_b"]:.3f} ms (key B).',
+                   size=13, color=MUTED, width=W - 128))
+    height = y + 84
+    return page('Unlock sequence', W, height, '\n'.join(el)), height
+
+
+# ---------------------------------------------------------------------------
+# Figure 2: field maps
+# ---------------------------------------------------------------------------
+
+BYTE = 39  # px per byte in every field map
+
+
+def field_map(x, y, fields):
+    """fields: [(label, n_bytes, colors, sublabel)] drawn as one row of cells with byte offsets above."""
+    el = []
+    off = 0
+    cx = x
+    for label, n, colors, sub in fields:
+        fill, border, ink = colors
+        w = n * BYTE
+        el.append(text(cx, y, str(off), size=11, color=MUTED, family=MONO))
+        if label:
+            inner = (f'<span><span style="font-size: 13px; font-weight: 500">{label}</span>'
+                     + (f'<br><span style="font-family: {MONO}; font-size: 11px; opacity: 0.85">{sub}</span>'
+                        if sub else '') + '</span>')
+        else:
+            inner = f'<span style="font-family: {MONO}; font-size: 13px; font-weight: 500">{sub}</span>'
+        el.append(f'<div style="position: absolute; left: {cx}px; top: {y + 20}px; width: {w}px; height: 52px; '
+                  f'box-sizing: border-box; display: flex; align-items: center; justify-content: center; '
+                  f'text-align: center; line-height: 16px; padding: 0 4px; background: {fill}; '
+                  f'border: 1px solid {border}; margin-left: -1px; color: {ink}">{inner}</div>')
+        off += n
+        cx += w
+    el.append(text(cx, y, str(off), size=11, color=MUTED, family=MONO))
+    return el
+
+
+def section(y, title, meta, fields, caption):
+    el = [text(64, y, title, size=16, weight=600),
+          text(64, y + 24, meta, size=13, color=MUTED)]
+    el += field_map(64, y + 52, fields)
+    if caption:
+        el.append(text(64, y + 134, caption, size=13, color=MUTED, width=W - 128))
+    return el
+
+
+def packet_format(uniq):
+    el = [text(64, 56, 'Packet and field layout', size=30, weight=600),
+          text(64, 104, 'VERSO CLIQ key-cylinder protocol, decoded from the 2024 captures &nbsp;·&nbsp; '
+                        'byte offsets above each field', size=15, color=MUTED),
+          legend(64, 64)]
+
+    y = 172
+    el.append(text(64, y, 'Framing', size=16, weight=600))
+    el.append(text(64, y + 24, 'every packet, both directions', size=13, color=MUTED))
+    frame = [('SEQ', 1, GREY, '1-5'), ('CODE', 1, GREY, None), ('LEN', 1, GREY, None),
+             ('DATA', 8, GREY, 'LEN bytes'), ('CHK', 1, GREY, None)]
+    for i, (prefix, who) in enumerate((('82', 'Command · key → cylinder'), ('84', 'Response · cylinder → key'))):
+        ry = y + 52 + i * 90
+        el.append(text(64, ry, who, size=13, weight=500))
+        cx = 64
+        for label, n, colors, sub in [(prefix, 1, GREY, None), ('00', 1, GREY, None)] + frame:
+            fill, border, ink = colors
+            inner = (f'<span><span style="font-family: {MONO}; font-size: 13px; font-weight: 500">{label}</span>'
+                     + (f'<br><span style="font-size: 11px">{sub}</span>' if sub else '') + '</span>')
+            el.append(f'<div style="position: absolute; left: {cx}px; top: {ry + 24}px; width: {n * 52}px; '
+                      f'height: 52px; box-sizing: border-box; display: flex; align-items: center; '
+                      f'justify-content: center; text-align: center; line-height: 16px; background: {fill}; '
+                      f'border: 1px solid {border}; margin-left: -1px; color: {ink}">{inner}</div>')
+            cx += n * 52
+    codes = [
+        ('CODE · command', '01 identity · 08 nonce request · 0A encrypted block · 80 MAC'),
+        ('CODE · status', '10 busy · 11 ok · 21 rejected at the encrypted block · 23 rejected at the MAC · '
+                          '34 identity format refused'),
+        ('CHK', '(0x100 - sum of all preceding bytes) mod 256'),
     ]
-    for i, line in enumerate(consistent):
-        ax.text(10, col_y - 1.8 - i * 1.3, f'- {line}',
-                ha='left', va='center', fontsize=8, color=K)
+    tx = 64 + 13 * 52 + 64
+    cy = y + 52
+    for k, v in codes:
+        el.append(text(tx, cy + 1, k.upper(), size=11, weight=600, color=MUTED, width=140,
+                       extra=' letter-spacing: 0.06em;'))
+        el.append(text(tx + 148, cy, v, size=13, width=W - 64 - tx - 148))
+        cy += 62 if len(v) > 60 else 44
+    y += 250
+    el.append(hline(64, y, W - 128))
+    y += 32
+    cfg = {s['folder']: ' '.join(f'{b:02X}' for b in s['key_config']) for s in uniq}
+    el += section(y, 'Key identity', 'step 2 data, LEN 0x1B, key → cylinder', [
+        ('', 1, GREY, '03'), ('system ID', 8, AMBER, 'ASCII'), ('padding', 7, GREY, '1E × 7'),
+        ('key config', 6, AMBER, cfg['key_a']), ('day', 2, AMBER, 'u16 LE'), ('minute', 2, AMBER, 'u16 LE'),
+        ('s', 1, AMBER, 'u8')],
+        'day 1 = 2000-01-01; minute of the day in local time. Key B config: ' + mono(cfg['key_b'])
+        + '. The 29-byte variant of step 1 appends ' + mono('0E 00') + '.')
+    y += 196
+    el += section(y, 'Cylinder identity', 'step 2 reply data, LEN 0x18, cylinder → key', [
+        ('', 1, GREY, '03'), ('system ID', 8, AMBER, 'ASCII'), ('padding', 7, GREY, '1E × 7'),
+        ('', 1, GREY, '61'), ('cyl. no.', 2, AMBER, 'u16 LE'), ('constant', 5, GREY, '01 00 04 00 00')],
+        'cylinder numbers seen: 16 and 397 (2024), 400 (2014)')
+    y += 196
+    el += section(y, 'Nonce', 'step 3 reply data, LEN 0x08, cylinder → key',
+                  [('nonce', 8, BLUE, 'new every session')], None)
+    y += 168
+    el += section(y, 'Encrypted block', 'step 4 data, LEN 0x20, key → cylinder',
+                  [('encrypted', 24, BLUE, 'new every session'), ('zero', 8, GREY, '00 × 8')], None)
+    y += 168
+    el += section(y, 'MAC', 'step 5 data, LEN 0x15, key → cylinder',
+                  [('MAC', 21, BLUE, 'new every session')], None)
+    y += 160
+    el.append(hline(64, y, W - 128))
+    el.append(text(64, y + 20, 'The vendor states 128-bit AES for key-cylinder communication. The cipher mode '
+                               'and the MAC construction cannot be identified from passive captures.',
+                   size=13, color=MUTED, width=W - 128))
+    height = y + 84
+    return page('Packet and field layout', W, height, '\n'.join(el)), height
 
-    ax.text(55, col_y, 'REJECTED:',
-            ha='left', va='center', fontsize=9, fontweight='bold', color=K)
-    ax.text(57, col_y - 1.8, '- AES-CBC + PKCS#7 padding',
-            ha='left', va='center', fontsize=8, color=K)
-    ax.text(57, col_y - 3.1, '  Would produce 32B ct, not 24+8',
-            ha='left', va='center', fontsize=7.5, color=K, style='italic')
 
-    # Closing note (left-aligned, no box)
-    ax.text(8, 2.5, 'AES mode cannot be determined passively. Distinguishing requires chosen-plaintext captures or side-channel analysis.',
-            ha='left', va='center', fontsize=8, color=K, style='italic')
+def render(html, height, name, keep_html):
+    from playwright.sync_api import sync_playwright
+    path = os.path.join(OUT, name)
+    if keep_html:
+        with open(path.replace('.png', '.html'), 'w') as f:
+            f.write(html)
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        pg = browser.new_page(viewport={'width': W, 'height': height}, device_scale_factor=2)
+        pg.set_content(html, wait_until='networkidle')
+        pg.evaluate('document.fonts.ready')
+        pg.locator('#figure').screenshot(path=path)
+        browser.close()
+    print(f'{name}: {os.path.getsize(path) / 1024:.0f} KB')
 
-    out = os.path.join(OUT, 'aes_block_alignment.png')
-    plt.savefig(out, dpi=150, facecolor='white', bbox_inches='tight',
-                pad_inches=0.05, edgecolor='none')
-    plt.close(fig)
-    strip_meta(out)
-    print(f'aes_block_alignment.png: {os.path.getsize(out)/1024:.0f} KB')
 
 if __name__ == '__main__':
-    make_protocol_flow()
-    make_aes_block()
+    os.makedirs(OUT, exist_ok=True)
+    keep = '--html' in sys.argv
+    uniq = unique(load_captures())
+    render(*protocol_flow(uniq), 'protocol_flow.png', keep)
+    render(*packet_format(uniq), 'packet_format.png', keep)
