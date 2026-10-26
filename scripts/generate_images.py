@@ -21,20 +21,22 @@ from sessions import REPO_ROOT, load_captures, unique
 OUT = os.path.join(REPO_ROOT, 'assets')
 
 # Design tokens
-GROUND = '#F6F5F1'
-INK = '#1C1E23'
-MUTED = '#5B5F66'
-RULE = '#D5D1C7'
-LIFELINE = '#B9B4A8'
-ARROW = '#2B2E35'
-BUSY = '#9E998D'
-AMBER = ('#FBE7CF', '#E3AE72', '#8A4208')    # fill, border, ink: plaintext identifiers
-BLUE = ('#DBE7F6', '#9DBBE3', '#1D4C87')     # cryptographic fields
-GREY = ('#ECEAE4', '#CFCBC1', '#3A3D44')     # framing, constants
-SANS = "'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif"
-MONO = "'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace"
+GROUND = '#FFFFFF'
+INK = '#111111'
+MUTED = '#555555'
+RULE = '#BFBFBF'
+LIFELINE = '#404040'
+ARROW = '#111111'
+BUSY = '#808080'
+AMBER = ('#FFF2CC', '#BF9000', '#7F6000')    # fill, border, ink: plaintext identifiers
+BLUE = ('#DDEBF7', '#2F5597', '#1F3864')     # cryptographic fields
+GREY = ('#F2F2F2', '#7F7F7F', '#262626')     # framing, constants
+CARD_RADIUS = 0
+PILL_RADIUS = 2
+SANS = "'Roboto', 'Helvetica Neue', Arial, sans-serif"
+MONO = "'Roboto Mono', Consolas, 'DejaVu Sans Mono', monospace"
 FONTS = ('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
-         'family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">')
+         'family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500;700&display=swap">')
 W = 1400
 
 
@@ -66,7 +68,7 @@ def text(x, y, content, size=15, weight=400, color=INK, width=None, family=SANS,
 def pill(label, colors, mono=False):
     fill, border, ink = colors
     family = MONO if mono else SANS
-    return (f'<span style="display: inline-block; padding: 0 7px; margin: 0 2px; border-radius: 4px; '
+    return (f'<span style="display: inline-block; padding: 0 7px; margin: 0 2px; border-radius: {PILL_RADIUS}px; '
             f'background: {fill}; border: 1px solid {border}; color: {ink}; font-family: {family}; '
             f'font-size: 12px; line-height: 20px; font-weight: 500; vertical-align: 1px">{label}</span>')
 
@@ -109,7 +111,7 @@ def arrow(x1, x2, y, color=ARROW, width=2, dash=False):
 def legend(right, y):
     items = [('plaintext identifier', AMBER), ('cryptographic field', BLUE), ('framing / constant', GREY)]
     html = ''.join(f'<span style="display: flex; align-items: center; gap: 8px">'
-                   f'<span style="width: 14px; height: 14px; border-radius: 3px; background: {c[0]}; '
+                   f'<span style="width: 14px; height: 14px; background: {c[0]}; '
                    f'border: 1px solid {c[1]}"></span>{label}</span>' for label, c in items)
     return (f'<div style="position: absolute; right: {right}px; top: {y}px; display: flex; gap: 20px; '
             f'font-size: 13px; line-height: 20px; color: {MUTED}">{html}</div>')
@@ -168,7 +170,7 @@ def protocol_flow(uniq):
     ]
 
     el = []
-    el.append(text(64, 56, 'Unlock sequence', size=30, weight=600))
+    el.append(text(64, 56, 'Unlock sequence', size=28, weight=700))
     el.append(text(64, 104, f'VERSO CLIQ key and cylinder, 2024 captures &nbsp;·&nbsp; {len(uniq)} sessions, '
                             f'2 keys, 2 cylinders &nbsp;·&nbsp; {min(totals):.1f}-{max(totals):.1f} ms per unlock',
                    size=15, color=MUTED))
@@ -179,8 +181,8 @@ def protocol_flow(uniq):
                          (CX, 'Cylinder', 'no battery · keeps rights and audit log')):
         el.append(f'<div style="position: absolute; left: {x - 140}px; top: 164px; width: 280px; height: 64px; '
                   f'box-sizing: border-box; display: flex; align-items: center; justify-content: center; '
-                  f'text-align: center; background: #FFFFFF; border: 1px solid {RULE}; border-radius: 8px">'
-                  f'<span><b style="font-size: 16px; font-weight: 600">{name}</b><br>'
+                  f'text-align: center; background: #FFFFFF; border: 1px solid {LIFELINE}; border-radius: {CARD_RADIUS}px">'
+                  f'<span><b style="font-size: 16px; font-weight: 700">{name}</b><br>'
                   f'<span style="font-size: 12px; color: {MUTED}">{sub}</span></span></div>')
 
     y = 268
@@ -190,9 +192,9 @@ def protocol_flow(uniq):
             rows.append(hline(64, y, W - 128))
             y += 24
         top = y
-        rows.append(text(64, top, f'STEP {num}', size=12, weight=600, color=MUTED,
+        rows.append(text(64, top, f'STEP {num}', size=12, weight=700, color=MUTED,
                          extra=' letter-spacing: 0.08em;'))
-        rows.append(text(64, top + 20, title, size=17, weight=600, width=240))
+        rows.append(text(64, top + 20, title, size=17, weight=700, width=240))
         rows.append(text(64, top + 46, note, size=13, color=MUTED, width=230))
         for item in items:
             if item[0] == 'wait':
@@ -264,7 +266,7 @@ def field_map(x, y, fields):
 
 
 def section(y, title, meta, fields, caption):
-    el = [text(64, y, title, size=16, weight=600),
+    el = [text(64, y, title, size=16, weight=700),
           text(64, y + 24, meta, size=13, color=MUTED)]
     el += field_map(64, y + 52, fields)
     if caption:
@@ -273,13 +275,13 @@ def section(y, title, meta, fields, caption):
 
 
 def packet_format(uniq):
-    el = [text(64, 56, 'Packet and field layout', size=30, weight=600),
+    el = [text(64, 56, 'Packet and field layout', size=28, weight=700),
           text(64, 104, 'VERSO CLIQ key-cylinder protocol, decoded from the 2024 captures &nbsp;·&nbsp; '
                         'byte offsets above each field', size=15, color=MUTED),
           legend(64, 64)]
 
     y = 172
-    el.append(text(64, y, 'Framing', size=16, weight=600))
+    el.append(text(64, y, 'Framing', size=16, weight=700))
     el.append(text(64, y + 24, 'every packet, both directions', size=13, color=MUTED))
     frame = [('SEQ', 1, GREY, '1-5'), ('CODE', 1, GREY, None), ('LEN', 1, GREY, None),
              ('DATA', 8, GREY, 'LEN bytes'), ('CHK', 1, GREY, None)]
@@ -305,7 +307,7 @@ def packet_format(uniq):
     tx = 64 + 13 * 52 + 64
     cy = y + 52
     for k, v in codes:
-        el.append(text(tx, cy + 1, k.upper(), size=11, weight=600, color=MUTED, width=140,
+        el.append(text(tx, cy + 1, k.upper(), size=11, weight=700, color=MUTED, width=140,
                        extra=' letter-spacing: 0.06em;'))
         el.append(text(tx + 148, cy, v, size=13, width=W - 64 - tx - 148))
         cy += 62 if len(v) > 60 else 44

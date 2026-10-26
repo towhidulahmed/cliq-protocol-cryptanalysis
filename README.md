@@ -105,7 +105,7 @@ The key is the bus master and powers the cylinder through the contact; the cylin
 
 **Byte framing and busy polls.** While the cylinder computes, the key reads a single status bit from it about every 1.15 ms. These one-bit reads are separated from the bytes around them by idle gaps. The decoder ([`scripts/decode_signal.py`](scripts/decode_signal.py)) splits the signal at every idle gap longer than 150 µs and re-establishes byte alignment after each one. One-bit groups are recorded as busy polls, and the rest are parsed as packets and validated with the length field and checksum. The decoder accepts both relative and absolute (ISO 8601) timestamps.
 
-> An earlier version of the decoder concatenated all bits of a capture. The busy-poll bits then shifted every following byte by 4 bits, so no nonce, encrypted block or MAC was found in the 2024 captures. All results derived from that decoding have been withdrawn (§10).
+> An earlier version of the decoder concatenated all bits of a capture. The busy-poll bits then shifted every following byte by 4 bits, so no nonce, encrypted block or MAC was found in the 2024 captures. All results derived from that decoding have been withdrawn.
 
 **Result: 308 of 308 packets in the 22 sessions, and 8 of 8 packets in the fragments, have a consistent length field and a valid checksum. All 22 sessions end in a successful unlock.**
 
@@ -314,26 +314,6 @@ Together with the absence of distance bounding, this makes a relay attack plausi
 | Capture a cylinder that accepts the 29-byte identity | The meaning of the newer format; whether a downgrade is possible |
 | Export the remaining `.sal` recordings; capture more keys and installations | Larger sample; which fields are installation-specific |
 | Power or EM traces during the encrypted-block and MAC steps | Side-channel leakage (cf. [R5], [R7]) |
-
----
-
-## 10. Corrections to Earlier Versions
-
-The version of this README published before this revision contained claims that do not hold once the captures are decoded correctly:
-
-| Earlier claim | Correction |
-|---------------|-----------|
-| MAC is SHA-1 from a Maxim DS28EC20 (`Compute MAC`), "high confidence" | The DS28EC20 is a plain 20 Kb 1-Wire EEPROM without a SHA-1 engine or MAC command [D1], and its commands do not match the observed codes. The MAC construction is unknown. |
-| MAC is 22 bytes (20 B SHA-1 + 2 B device status) | The MAC field is 21 bytes (`LEN 0x15`). The 22nd byte is the packet checksum. |
-| AES mode narrowed down from the 24 + 8 byte layout | AES-128 is the vendor's statement [V1]. The layout fits several modes, and passive data cannot identify the mode. |
-| Trailing byte unidentified after a CRC-8 search | It is an 8-bit additive checksum (§3.2). |
-| Bytes 27-28 identify the key; bytes 29-33 are a counter or session value | Identity bytes 22-26 are the key's date and time (§4.2). The keys differ in the configuration block. |
-| 2014 data from two different keys | All eight 2014 sessions are from one key at one cylinder (number 400), on two days. |
-| 23 captured sessions | 22 unique sessions from 2024 in this repository. The 15 files of the earlier version contained 12 unique recordings. |
-| `user1_key` and `user2_key` hold the two users' sessions | `user1_key/session_05-08` were recorded with key B. |
-| Unlock takes ~7.6 ms; ~255 bytes per session | The exchange takes 83.8-87.4 ms. The byte count was an artefact of the decoder. |
-| Protocol unchanged for 10 years | The 2024 key adds a 29-byte identity attempt, and the steps are renumbered (§3.3). The 27-byte layout is still accepted. |
-| Avalanche, entropy-map and same-key/cross-key results | They were computed at fixed byte offsets of misaligned data that did not contain the nonce or MAC. Replaced by §5.2. |
 
 ---
 
